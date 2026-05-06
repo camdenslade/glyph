@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/binate-gpu-core",
+    "crates/binate-gpu-render",
+    "crates/binate-gpu-text",
+    "crates/binate-gpu-platform",
+    "crates/binate-gpu-native",
+    "crates/binate-gpu-demo",
+]
+resolver = "2"

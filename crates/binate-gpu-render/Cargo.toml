@@ -1,0 +1,10 @@
+[package]
+name = "binate-gpu-render"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+binate-gpu-core = { path = "../binate-gpu-core" }
+binate-gpu-text = { path = "../binate-gpu-text" }
+wgpu = "22"
+bytemuck = { version = "1", features = ["derive"] }

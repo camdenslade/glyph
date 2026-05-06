@@ -1,0 +1,11 @@
+[package]
+name = "binate-gpu-platform"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+binate-gpu-core   = { path = "../binate-gpu-core" }
+binate-gpu-render = { path = "../binate-gpu-render" }
+winit    = "0.30"
+wgpu     = "22"
+pollster = "0.3"
