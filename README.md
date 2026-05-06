@@ -1,27 +1,24 @@
-<img src="Binate-GPU.png" alt="Binate GPU" width="160" />
+<p align="center">
+  <img src="Binate-GPU.png" alt="Binate GPU" width="320" />
+</p>
 
-# Binate GPU
+<h1 align="center">Binate GPU</h1>
 
-A GPU-accelerated reactive UI framework for Rust. Custom wgpu rendering pipeline, signal-based state, flexbox layout, and a macOS native bridge.
+<p align="center">
+  A GPU-accelerated reactive UI framework for Rust.
+</p>
 
-## Architecture
+---
 
-```
-binate-gpu-core      Signal<T>, View tree (Column/Row/Text/Button/Rect), builder API, Taffy layout
-binate-gpu-text      cosmic-text integration, glyph atlas, text measurement and shaping
-binate-gpu-render    wgpu render pipelines, SDF rounded rects and glyph atlas text
-binate-gpu-platform  winit event loop, signal-driven redraws, mouse hit-test, click handlers
-binate-gpu-native    AppKit bridge, renders View trees as native NSStackView/NSTextField/NSButton
-binate-gpu-demo      Counter app, the canonical working example
-```
+Binate GPU renders UI via custom wgpu pipelines with signal-based reactivity and flexbox layout. Describe your interface as a `View` tree, bind state with `Signal<T>`, and the platform loop redraws automatically on every write. A macOS AppKit bridge is also available for native rendering from the same tree.
 
 ## Quick Start
 
-```bash
+```sh
 cargo run -p binate-gpu-demo
 ```
 
-The demo opens an 800×600 window with a reactive counter backed by `Signal<i32>`.
+The demo opens an 800x600 window with a reactive counter backed by `Signal<i32>`.
 
 ## Example
 
@@ -53,32 +50,34 @@ fn main() {
 }
 ```
 
-## Rendering
+## How it works
 
-The GPU path runs two passes per frame:
+Each frame runs two GPU passes:
 
-1. **Rect pass**: each `Rect` and `Button` background is drawn with a WGSL SDF shader that produces anti-aliased rounded corners at any radius.
-2. **Text pass**: glyphs are shaped by cosmic-text, packed into a 1024x1024 atlas, and rendered via a second pipeline that samples the atlas alpha and applies vertex color.
+1. **Rect pass**: filled rectangles and button backgrounds drawn with a WGSL SDF shader, anti-aliased rounded corners at any radius
+2. **Text pass**: glyphs shaped by cosmic-text, packed into a 1024x1024 R8 atlas, rendered by sampling atlas alpha and applying vertex color
 
-Both pipelines use alpha blending; rects are submitted first so text always composites on top.
-
-## Layout
-
-`binate-gpu-core` converts the `View` tree into a flat list of positioned quads using [Taffy](https://github.com/DioxusLabs/taffy) (flexbox). Each `Column` and `Row` maps to a flex container; `Text`, `Button`, and `Rect` are leaf nodes with intrinsic sizes measured before layout runs.
+Rects are submitted before text so text always composites on top. Layout is computed by [Taffy](https://github.com/DioxusLabs/taffy) (flexbox) each frame using real shaped text metrics for intrinsic sizing.
 
 ## Signals
 
+`Signal<T>` is a cloneable reactive cell. Any write sets a thread-local dirty flag; the platform loop checks it after every event and calls `request_redraw` when set.
+
 ```rust
-let value = Signal::new(42i32);
-value.set(value.get() + 1); // marks the window dirty
-// next frame: App detects needs_redraw(), calls your closure, re-renders
+let value = Signal::new(0i32);
+value.set(value.get() + 1); // triggers a redraw on the next event
 ```
 
-`Signal<T>` wraps an `Arc<Mutex<T>>` and sets a thread-local dirty flag on write. The platform loop checks this flag after every event and requests a redraw when it's set.
+## Crates
 
-## Native Bridge (macOS)
-
-`binate-gpu-native` converts the same `View` tree into a live `NSStackView` hierarchy using objc2 bindings. Button callbacks are stored as fat-pointer closures behind an Objective-C `ActionTarget` class. This path is compile-tested but not yet wired to a demo binary. The GPU path (`binate-gpu-platform`) is the primary runtime today.
+| Crate | Role |
+|---|---|
+| `binate-gpu-core` | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
+| `binate-gpu-text` | cosmic-text shaping, glyph atlas, text measurement |
+| `binate-gpu-render` | wgpu pipelines, two-pass renderer |
+| `binate-gpu-platform` | winit event loop, hit-test, click dispatch |
+| `binate-gpu-native` | macOS AppKit bridge (objc2) |
+| `binate-gpu-demo` | Counter app example |
 
 ## Status
 
