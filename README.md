@@ -2,17 +2,17 @@
 
 # Binate GPU
 
-A GPU-accelerated reactive UI framework for Rust. Custom wgpu rendering pipeline, signal-based state, flexbox layout, and a macOS native bridge — all in one workspace.
+A GPU-accelerated reactive UI framework for Rust. Custom wgpu rendering pipeline, signal-based state, flexbox layout, and a macOS native bridge.
 
 ## Architecture
 
 ```
 binate-gpu-core      Signal<T>, View tree (Column/Row/Text/Button/Rect), builder API, Taffy layout
 binate-gpu-text      cosmic-text integration, glyph atlas, text measurement and shaping
-binate-gpu-render    wgpu render pipelines — SDF rounded rects and glyph atlas text
+binate-gpu-render    wgpu render pipelines, SDF rounded rects and glyph atlas text
 binate-gpu-platform  winit event loop, signal-driven redraws, mouse hit-test, click handlers
-binate-gpu-native    AppKit bridge — renders View trees as native NSStackView/NSTextField/NSButton
-binate-gpu-demo      Counter app — the canonical working example
+binate-gpu-native    AppKit bridge, renders View trees as native NSStackView/NSTextField/NSButton
+binate-gpu-demo      Counter app, the canonical working example
 ```
 
 ## Quick Start
@@ -57,8 +57,8 @@ fn main() {
 
 The GPU path runs two passes per frame:
 
-1. **Rect pass** — each `Rect` and `Button` background is drawn with a WGSL SDF shader that produces anti-aliased rounded corners at any radius.
-2. **Text pass** — glyphs are shaped by cosmic-text, packed into a 1024×1024 atlas, and rendered via a second pipeline that samples the atlas alpha and applies vertex color.
+1. **Rect pass**: each `Rect` and `Button` background is drawn with a WGSL SDF shader that produces anti-aliased rounded corners at any radius.
+2. **Text pass**: glyphs are shaped by cosmic-text, packed into a 1024x1024 atlas, and rendered via a second pipeline that samples the atlas alpha and applies vertex color.
 
 Both pipelines use alpha blending; rects are submitted first so text always composites on top.
 
@@ -78,7 +78,7 @@ value.set(value.get() + 1); // marks the window dirty
 
 ## Native Bridge (macOS)
 
-`binate-gpu-native` converts the same `View` tree into a live `NSStackView` hierarchy using objc2 bindings. Button callbacks are stored as fat-pointer closures behind an Objective-C `ActionTarget` class. This path is compile-tested but not yet wired to a demo binary — the GPU path (`binate-gpu-platform`) is the primary runtime today.
+`binate-gpu-native` converts the same `View` tree into a live `NSStackView` hierarchy using objc2 bindings. Button callbacks are stored as fat-pointer closures behind an Objective-C `ActionTarget` class. This path is compile-tested but not yet wired to a demo binary. The GPU path (`binate-gpu-platform`) is the primary runtime today.
 
 ## Status
 
@@ -97,4 +97,4 @@ value.set(value.get() + 1); // marks the window dirty
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

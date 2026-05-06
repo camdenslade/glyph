@@ -1,5 +1,7 @@
+// Single R8Unorm texture; increase if the atlas fills up for large font sizes.
 const ATLAS_SIZE: u32 = 1024;
 
+/// UV coordinates and pixel metrics for one glyph in the atlas.
 #[derive(Clone, Copy, Debug)]
 pub struct GlyphUv {
     pub u0: f32,
@@ -12,6 +14,10 @@ pub struct GlyphUv {
     pub top: i32,
 }
 
+/// Shelf-packing glyph atlas backed by a single GPU texture.
+///
+/// Glyphs are packed left-to-right on the current shelf. When a glyph does
+/// not fit horizontally a new shelf is started at `shelf_y + shelf_h`.
 pub struct GlyphAtlas {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,

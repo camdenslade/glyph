@@ -21,6 +21,7 @@ pub fn measure_text(font_system: &mut FontSystem, text: &str, font_size: f32, ma
     (width, height)
 }
 
+/// A positioned glyph ready to be uploaded as a textured quad.
 pub struct GlyphQuad {
     pub x: f32,
     pub y: f32,
@@ -28,6 +29,10 @@ pub struct GlyphQuad {
     pub color: Color,
 }
 
+/// Owns the cosmic-text `FontSystem` and per-session glyph UV cache.
+///
+/// The UV cache maps `CacheKey` (font + size + subpixel position) to atlas
+/// coordinates so each unique glyph is rasterized and uploaded only once.
 pub struct TextRenderer {
     font_system: FontSystem,
     swash_cache: SwashCache,

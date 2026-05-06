@@ -1,5 +1,6 @@
 use taffy::Style;
 
+/// Linear RGBA color with components in [0, 1].
 #[derive(Clone, Copy, Debug)]
 pub struct Color {
     pub r: f32,
@@ -35,6 +36,8 @@ pub enum TextAlign {
     Right,
 }
 
+/// The UI tree. Each variant is a node; `Column` and `Row` are containers,
+/// the rest are leaves that produce rendered output.
 pub enum View {
     Rect {
         color: Color,
@@ -67,8 +70,7 @@ pub enum View {
     },
 }
 
-// ── View builders ─────────────────────────────────────────────────────────────
-
+/// Builder returned by [`text`]. Call `.into()` or `.into_view()` to finish.
 pub struct TextView {
     view: View,
 }
@@ -106,6 +108,7 @@ impl From<TextView> for View {
     }
 }
 
+/// Builder returned by [`button`]. Call `.into()` or `.into_view()` to finish.
 pub struct ButtonView {
     view: View,
 }
@@ -149,8 +152,6 @@ impl From<ButtonView> for View {
         b.view
     }
 }
-
-// ── Helper functions ──────────────────────────────────────────────────────────
 
 pub fn text(content: impl Into<String>, font_size: f32) -> TextView {
     TextView {

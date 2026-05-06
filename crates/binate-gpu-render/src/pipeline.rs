@@ -1,8 +1,10 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-// ── Shared vertex type ────────────────────────────────────────────────────────
-
+/// Vertex for the rect pipeline. `rect` carries the pixel-space bounds of the
+/// full rectangle to every vertex so the SDF shader can compute corner distance
+/// regardless of which corner the vertex sits at. `_pad` aligns the struct to
+/// 16 bytes as required by wgpu's vertex buffer layout rules.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct RectVertex {
@@ -10,7 +12,7 @@ pub struct RectVertex {
     pub color:  [f32; 4],
     pub rect:   [f32; 4], // pixel-space bounds: [x0, y0, x1, y1]
     pub radius: f32,
-    pub _pad:   f32,      // align to 16 bytes
+    pub _pad:   f32,
 }
 
 #[repr(C)]
@@ -21,16 +23,13 @@ pub struct TextVertex {
     pub color: [f32; 4],
 }
 
-// ── Screen uniform ────────────────────────────────────────────────────────────
-
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ScreenUniform {
     pub size: [f32; 2],
 }
 
-// ── RectPipeline ─────────────────────────────────────────────────────────────
-
+/// Renders filled rectangles with optional SDF rounded corners.
 pub struct RectPipeline {
     pub pipeline:   wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
@@ -123,8 +122,7 @@ impl RectPipeline {
     }
 }
 
-// ── TextPipeline ──────────────────────────────────────────────────────────────
-
+/// Renders glyph quads sampled from the R8 atlas texture.
 pub struct TextPipeline {
     pub pipeline:      wgpu::RenderPipeline,
     pub screen_bg:     wgpu::BindGroup,

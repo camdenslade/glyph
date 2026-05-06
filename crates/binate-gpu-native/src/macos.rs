@@ -14,10 +14,10 @@ use objc2_app_kit::{
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
 use std::cell::Cell;
 
-// ── Button action target ──────────────────────────────────────────────────────
-
+// A Rust fat pointer (`*mut dyn Fn()`) is two words: data pointer + vtable pointer.
+// We split it into two `*mut ()` ivars so it can be stored inside an Objective-C
+// object without a separate heap allocation. `Drop` reassembles and frees it.
 struct ActionTargetIvars {
-    // Fat pointer stored as two thin pointers: data + vtable.
     callback_data:   Cell<*mut ()>,
     callback_vtable: Cell<*mut ()>,
 }
@@ -73,11 +73,13 @@ impl Drop for ActionTarget {
     }
 }
 
-// ── Public entry point ────────────────────────────────────────────────────────
-
+/// Entry point for the macOS native render path.
 pub struct NativeApp;
 
 impl NativeApp {
+    /// Build a `View` tree once and render it as a native AppKit window.
+    /// `targets` keeps `ActionTarget` objects alive for the duration of the run
+    /// loop; dropping them before `app.run` would leave dangling ObjC selectors.
     pub fn run(build_view: impl Fn() -> View + 'static) {
         let mtm = MainThreadMarker::new().expect("must run on main thread");
 
@@ -111,8 +113,6 @@ impl NativeApp {
         drop(targets);
     }
 }
-
-// ── View → NSView tree ────────────────────────────────────────────────────────
 
 fn build_nsview(
     mtm: MainThreadMarker,

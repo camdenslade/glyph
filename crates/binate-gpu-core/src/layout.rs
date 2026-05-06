@@ -1,11 +1,15 @@
 use crate::view::{Color, FontWeight, TextAlign, View};
 use taffy::{Layout, NodeId, Size, TaffyTree};
 
+/// A single positioned UI element after layout. `layout.location` is in
+/// absolute pixel coordinates relative to the window top-left.
 pub struct FlatView<'a> {
     pub kind: FlatViewKind<'a>,
     pub layout: Layout,
 }
 
+/// The leaf variants of a laid-out view. Container nodes (Column/Row) are
+/// consumed during layout and do not appear in the flat list.
 pub enum FlatViewKind<'a> {
     Rect {
         color: Color,
@@ -27,12 +31,13 @@ pub enum FlatViewKind<'a> {
     },
 }
 
+/// Stateless entry point for layout. Call `ViewTree::build` each frame.
 pub struct ViewTree;
 
 impl ViewTree {
-    /// Build a flat list of positioned views. `measure` returns (width, height) for a
-    /// text string at a given font size and available width — used to size leaf nodes
-    /// with real shaped metrics rather than a character-count approximation.
+    /// Run Taffy flexbox layout on `root` and return a flat list of positioned
+    /// leaves. `measure` is called for each text/button node to get its intrinsic
+    /// size from real shaped metrics before layout is computed.
     pub fn build<'a>(
         root: &'a View,
         width: f32,

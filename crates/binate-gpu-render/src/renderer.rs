@@ -3,6 +3,7 @@ use binate_gpu_core::{Color, FlatView, FlatViewKind, FontWeight, TextAlign};
 use binate_gpu_text::{GlyphAtlas, TextRenderer, measure_text};
 use wgpu::util::DeviceExt;
 
+/// Owns all wgpu state and drives the two-pass render loop.
 pub struct Renderer {
     pub device:        wgpu::Device,
     pub queue:         wgpu::Queue,
@@ -94,6 +95,8 @@ impl Renderer {
         self.text_pipeline.update_screen(&self.queue, width as f32, height as f32);
     }
 
+    /// Draw a frame. Rect verts are submitted first, then text verts, so text
+    /// always composites over backgrounds within the same render pass.
     pub fn render(&mut self, views: &[FlatView<'_>]) {
         let w = self.surface_cfg.width as f32;
         let h = self.surface_cfg.height as f32;
