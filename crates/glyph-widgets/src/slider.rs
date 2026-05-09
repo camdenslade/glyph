@@ -47,7 +47,7 @@ impl Component for Slider {
                     .into(),
             ])
             .into(),
-            track,
+            track.into(),
             row(vec![
                 button_step("-", {
                     let value = value.clone();

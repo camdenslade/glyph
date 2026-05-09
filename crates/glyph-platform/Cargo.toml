@@ -6,6 +6,10 @@ edition = "2021"
 [dependencies]
 glyph-core   = { path = "../glyph-core" }
 glyph-render = { path = "../glyph-render" }
+glyph-hot    = { path = "../glyph-hot", optional = true }
 winit    = "0.30"
 wgpu     = "22"
 pollster = "0.3"
+
+[features]
+hot-reload = ["glyph-hot"]

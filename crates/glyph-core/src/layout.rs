@@ -41,12 +41,14 @@ pub enum FlatViewKind {
     TextInput {
         value: Signal<String>,
         focused: Signal<bool>,
+        cursor: Signal<usize>,
         placeholder: String,
         font_size: f32,
         bg_color: Color,
         text_color: Color,
         border_color: Color,
         corner_radius: f32,
+        on_change: Option<Box<dyn Fn(String)>>,
         on_submit: Option<Box<dyn Fn(String)>>,
     },
     /// Begin a scissor clip region covering the given viewport rect.
@@ -129,9 +131,9 @@ fn expand(view: View, theme: &Theme) -> View {
             children: children.into_iter().map(|c| expand(c, theme)).collect(),
             style, bg_color, border_color, border_width, corner_radius, shadow, clip,
         },
-        View::ZStack { children, style } => View::ZStack {
+        View::ZStack { children, style, bg_color, border_color, border_width, corner_radius, shadow } => View::ZStack {
             children: children.into_iter().map(|c| expand(c, theme)).collect(),
-            style,
+            style, bg_color, border_color, border_width, corner_radius, shadow,
         },
         View::Scroll { child, offset_x, offset_y, style } => View::Scroll {
             child: Box::new(expand(*child, theme)),
@@ -175,7 +177,7 @@ fn build_node(
                 children.iter().map(|c| build_node(taffy, c, measure)).collect();
             taffy.new_with_children(style.clone(), &child_nodes).expect("taffy node")
         }
-        View::ZStack { children, style } => {
+        View::ZStack { children, style, .. } => {
             let child_nodes: Vec<NodeId> = children
                 .iter()
                 .map(|c| {
@@ -204,12 +206,17 @@ fn build_node(
                 };
                 taffy.new_leaf_with_context(style, Some((content.clone(), *font_size))).expect("taffy node")
             } else {
-                let (w, h) = measure(content, *font_size, 4096.0);
+                let (mw, mh) = measure(content, *font_size, 4096.0);
+                let w = match style.size.width {
+                    taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
+                    _ => taffy::Dimension::Length(mw),
+                };
+                let h = match style.size.height {
+                    taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
+                    _ => taffy::Dimension::Length(mh),
+                };
                 let style = taffy::Style {
-                    size: taffy::Size {
-                        width: taffy::Dimension::Length(w),
-                        height: taffy::Dimension::Length(h),
-                    },
+                    size: taffy::Size { width: w, height: h },
                     ..style.clone()
                 };
                 taffy.new_leaf_with_context(style, None).expect("taffy node")
@@ -217,13 +224,22 @@ fn build_node(
         }
         View::Button { label, font_size, style, .. } => {
             let (tw, th) = measure(label, *font_size, 4096.0);
-            let btn_w = tw + 24.0;
-            let btn_h = th + 24.0;
+            let lp_val = |lp: taffy::LengthPercentage| match lp {
+                taffy::LengthPercentage::Length(v) => v,
+                taffy::LengthPercentage::Percent(_) => 0.0,
+            };
+            let pad_x = lp_val(style.padding.left) + lp_val(style.padding.right);
+            let pad_y = lp_val(style.padding.top) + lp_val(style.padding.bottom);
+            let w = match style.size.width {
+                taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
+                _ => taffy::Dimension::Length(tw + pad_x),
+            };
+            let h = match style.size.height {
+                taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
+                _ => taffy::Dimension::Length(th + pad_y),
+            };
             let style = taffy::Style {
-                size: taffy::Size {
-                    width: taffy::Dimension::Length(btn_w),
-                    height: taffy::Dimension::Length(btn_h),
-                },
+                size: taffy::Size { width: w, height: h },
                 ..style.clone()
             };
             taffy.new_leaf(style).expect("taffy node")
@@ -274,9 +290,9 @@ fn collect(
                 layout: adjusted,
             });
         }
-        View::TextInput { value, focused, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_submit, .. } => {
+        View::TextInput { value, focused, cursor, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change, on_submit, .. } => {
             flat.push(FlatView {
-                kind: FlatViewKind::TextInput { value, focused, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_submit },
+                kind: FlatViewKind::TextInput { value, focused, cursor, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change, on_submit },
                 layout: adjusted,
             });
         }
@@ -305,7 +321,13 @@ fn collect(
                 flat.push(FlatView { kind: FlatViewKind::ClipEnd, layout: adjusted });
             }
         }
-        View::ZStack { children, .. } => {
+        View::ZStack { children, bg_color, border_color, border_width, corner_radius, shadow, .. } => {
+            if bg_color.is_some() || border_color.is_some() || shadow.is_some() {
+                flat.push(FlatView {
+                    kind: FlatViewKind::ContainerRect { bg_color, border_color, border_width, corner_radius, shadow },
+                    layout: adjusted,
+                });
+            }
             let child_nodes = taffy.children(node).expect("children");
             for (child_node, child_view) in child_nodes.iter().zip(children.into_iter()) {
                 collect(taffy, *child_node, child_view, flat, x, y);

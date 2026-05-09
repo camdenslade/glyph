@@ -1,7 +1,9 @@
+use crate::gpu_context::GpuContext;
 use crate::image_cache::ImageCache;
 use crate::pipeline::{ImagePipeline, RectPipeline, RectVertex, TextPipeline, TextVertex};
 use glyph_core::{Color, FlatView, FlatViewKind, FontWeight, TextAlign};
 use glyph_text::{GlyphAtlas, TextRenderer, measure_text};
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 // Shadow is approximated by drawing a slightly expanded, blurred rect behind the container.
@@ -9,10 +11,11 @@ use wgpu::util::DeviceExt;
 // expanded rect which is cheap and visually acceptable for UI drop shadows.
 const SHADOW_STEPS: u32 = 4;
 
-/// Owns all wgpu state and drives the render loop.
+/// Per-window GPU resources. The device and queue live in the shared
+/// `GpuContext`; the surface, pipelines, atlas, and image cache are
+/// per-window and owned here.
 pub struct Renderer {
-    pub device:        wgpu::Device,
-    pub queue:         wgpu::Queue,
+    ctx:               Arc<GpuContext>,
     pub surface:       wgpu::Surface<'static>,
     pub surface_cfg:   wgpu::SurfaceConfiguration,
     rect_pipeline:     RectPipeline,
@@ -50,55 +53,25 @@ impl DrawBatch {
 }
 
 impl Renderer {
-    pub async fn new(
-        instance: &wgpu::Instance,
+    pub fn new(
+        ctx: Arc<GpuContext>,
         surface: wgpu::Surface<'static>,
-        width: u32,
-        height: u32,
+        surface_cfg: wgpu::SurfaceConfiguration,
     ) -> Self {
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::None,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .expect("no adapter");
+        let device = &ctx.device;
+        let format = surface_cfg.format;
+        let width = surface_cfg.width as f32;
+        let height = surface_cfg.height as f32;
 
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default(), None)
-            .await
-            .expect("no device");
+        let rect_pipeline  = RectPipeline::new(device, format, width, height);
+        let text_pipeline  = TextPipeline::new(device, format, width, height);
+        let image_pipeline = ImagePipeline::new(device, format, width, height);
+        let atlas          = GlyphAtlas::new(device);
+        let text_renderer  = TextRenderer::new();
+        let atlas_bind_group = text_pipeline.make_atlas_bind_group(device, &atlas.view, &atlas.sampler);
+        let image_cache    = ImageCache::new();
 
-        let caps = surface.get_capabilities(&adapter);
-        let format = caps
-            .formats
-            .iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(caps.formats[0]);
-
-        let surface_cfg = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &surface_cfg);
-
-        let rect_pipeline = RectPipeline::new(&device, format, width as f32, height as f32);
-        let text_pipeline = TextPipeline::new(&device, format, width as f32, height as f32);
-        let image_pipeline = ImagePipeline::new(&device, format, width as f32, height as f32);
-        let atlas = GlyphAtlas::new(&device);
-        let text_renderer = TextRenderer::new();
-        let atlas_bind_group = text_pipeline.make_atlas_bind_group(&device, &atlas.view, &atlas.sampler);
-        let image_cache = ImageCache::new();
-
-        Self { device, queue, surface, surface_cfg, rect_pipeline, text_pipeline, image_pipeline, atlas, text_renderer, atlas_bind_group, image_cache }
+        Self { ctx, surface, surface_cfg, rect_pipeline, text_pipeline, image_pipeline, atlas, text_renderer, atlas_bind_group, image_cache }
     }
 
     /// Returns a closure suitable for passing to `ViewTree::build` as the measure function.
@@ -114,15 +87,16 @@ impl Renderer {
         }
         self.surface_cfg.width = width;
         self.surface_cfg.height = height;
-        self.surface.configure(&self.device, &self.surface_cfg);
-        self.rect_pipeline.update_screen(&self.queue, width as f32, height as f32);
-        self.text_pipeline.update_screen(&self.queue, width as f32, height as f32);
-        self.image_pipeline.update_screen(&self.queue, width as f32, height as f32);
+        self.surface.configure(&self.ctx.device, &self.surface_cfg);
+        self.rect_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
+        self.text_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
+        self.image_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
     }
 
     /// Draw a frame. `cursor_visible` controls whether text input cursors are
     /// shown this frame — callers toggle it on a timer for blink effect.
-    pub fn render(&mut self, views: Vec<FlatView>, cursor_visible: bool) {
+    /// `bg` is the window clear color (should be `theme.background`).
+    pub fn render(&mut self, views: Vec<FlatView>, cursor_visible: bool, bg: Color) {
         let sw = self.surface_cfg.width as f32;
         let sh = self.surface_cfg.height as f32;
 
@@ -130,7 +104,7 @@ impl Renderer {
         let mut clip_stack: Vec<Option<[u32; 4]>> = vec![None];
         let mut current = DrawBatch::new(None, cursor_visible);
 
-        push_rect(&mut current.rect_verts, 0.0, 0.0, sw, sh, Color::WHITE, 0.0);
+        push_rect(&mut current.rect_verts, 0.0, 0.0, sw, sh, bg, 0.0);
 
         for fv in views {
             match fv.kind {
@@ -158,13 +132,16 @@ impl Renderer {
                         FlatViewKind::Button { label, bg_color, hover_bg_color, text_color, corner_radius, font_size, .. } => {
                             let draw_bg = hover_bg_color.unwrap_or(bg_color);
                             push_rect(&mut current.rect_verts, l, t, fw, fh, draw_bg, corner_radius);
+                            // Measure the text to vertically center it within the button bounds.
+                            let (_, th) = self.text_renderer.measure(&label, font_size, fw);
+                            let text_y = t + (fh - th) * 0.5;
                             let quads = self.text_renderer.shape(
-                                &mut self.atlas, &self.queue, &label, font_size,
+                                &mut self.atlas, &self.ctx.queue, &label, font_size,
                                 text_color, FontWeight::Regular, TextAlign::Center,
-                                l + 12.0, t + 12.0, fw - 24.0,
+                                l, text_y, fw,
                             );
                             self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
-                                &self.device, &self.atlas.view, &self.atlas.sampler,
+                                &self.ctx.device, &self.atlas.view, &self.atlas.sampler,
                             );
                             for q in quads {
                                 push_glyph(&mut current.text_verts, q.x, q.y, q.uv, q.color);
@@ -173,18 +150,18 @@ impl Renderer {
                         FlatViewKind::Text { content, font_size, color, weight, align, wrap } => {
                             let max_w = if wrap { fw } else { fw.max(sw) };
                             let quads = self.text_renderer.shape(
-                                &mut self.atlas, &self.queue, &content, font_size,
+                                &mut self.atlas, &self.ctx.queue, &content, font_size,
                                 color, weight, align, l, t, max_w,
                             );
                             self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
-                                &self.device, &self.atlas.view, &self.atlas.sampler,
+                                &self.ctx.device, &self.atlas.view, &self.atlas.sampler,
                             );
                             for q in quads {
                                 push_glyph(&mut current.text_verts, q.x, q.y, q.uv, q.color);
                             }
                         }
                         FlatViewKind::TextInput {
-                            value, focused, placeholder,
+                            value, focused, cursor, placeholder,
                             font_size, bg_color, text_color, border_color, corner_radius, ..
                         } => {
                             let is_focused = focused.get();
@@ -195,7 +172,7 @@ impl Renderer {
 
                             // Border: draw a slightly larger rect behind background for a 1px border effect
                             push_rect(&mut current.rect_verts, l - 1.0, t - 1.0, fw + 2.0, fh + 2.0,
-                                if is_focused { Color::rgb(0.2, 0.4, 0.9) } else { border_color },
+                                if is_focused { Color::rgb(0.0, 0.47, 1.0) } else { border_color },
                                 corner_radius + 1.0,
                             );
                             // Redraw bg on top of border
@@ -213,28 +190,28 @@ impl Renderer {
 
                             if !display.is_empty() {
                                 let quads = self.text_renderer.shape(
-                                    &mut self.atlas, &self.queue, &display, font_size,
+                                    &mut self.atlas, &self.ctx.queue, &display, font_size,
                                     color, FontWeight::Regular, TextAlign::Left,
                                     text_x, text_y, fw - pad * 2.0,
                                 );
                                 self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
-                                    &self.device, &self.atlas.view, &self.atlas.sampler,
+                                    &self.ctx.device, &self.atlas.view, &self.atlas.sampler,
                                 );
                                 for q in quads {
                                     push_glyph(&mut current.text_verts, q.x, q.y, q.uv, q.color);
                                 }
                             }
 
-                            // Cursor: only when focused, driven by cursor_visible passed in via batch
+                            // Cursor at the stored byte position within the text.
                             if is_focused && current.cursor_visible {
-                                let (text_w, _) = if val.is_empty() {
-                                    (0.0, 0.0)
+                                let cur = cursor.get().min(val.len());
+                                let prefix = &val[..cur];
+                                let (prefix_w, _) = if prefix.is_empty() {
+                                    (0.0_f32, 0.0_f32)
                                 } else {
-                                    // Approximate cursor x by measuring text width
-                                    let (w, h) = self.text_renderer.measure(val.as_str(), font_size, fw);
-                                    (w, h)
+                                    self.text_renderer.measure(prefix, font_size, fw)
                                 };
-                                let cursor_x = (text_x + text_w).min(l + fw - pad);
+                                let cursor_x = (text_x + prefix_w).min(l + fw - pad);
                                 let cursor_h = font_size * 1.2;
                                 let cursor_y = t + (fh - cursor_h) / 2.0;
                                 push_rect(&mut current.rect_verts, cursor_x, cursor_y, 2.0, cursor_h, text_color, 0.0);
@@ -283,13 +260,13 @@ impl Renderer {
         // Preload all image textures before the render pass borrows the encoder.
         for batch in &batches {
             for img_call in &batch.image_calls {
-                self.image_cache.preload(&self.device, &self.queue, &img_call.path);
+                self.image_cache.preload(&self.ctx.device, &self.ctx.queue, &img_call.path);
             }
         }
 
         let output = self.surface.get_current_texture().expect("surface texture");
         let view = output.texture.create_view(&Default::default());
-        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let mut encoder = self.ctx.device.create_command_encoder(&Default::default());
 
         {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -298,7 +275,7 @@ impl Renderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: bg.r as f64, g: bg.g as f64, b: bg.b as f64, a: bg.a as f64 }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -318,7 +295,7 @@ impl Renderer {
                 }
 
                 if !batch.rect_verts.is_empty() {
-                    let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    let vbuf = self.ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: None,
                         contents: bytemuck::cast_slice(&batch.rect_verts),
                         usage: wgpu::BufferUsages::VERTEX,
@@ -330,7 +307,7 @@ impl Renderer {
                 }
 
                 if !batch.text_verts.is_empty() {
-                    let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    let vbuf = self.ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: None,
                         contents: bytemuck::cast_slice(&batch.text_verts),
                         usage: wgpu::BufferUsages::VERTEX,
@@ -345,9 +322,9 @@ impl Renderer {
                 for img_call in &batch.image_calls {
                     if let Some(gpu_img) = self.image_cache.get(&img_call.path) {
                         let img_bg = self.image_pipeline.make_bind_group(
-                            &self.device, &gpu_img.view, &gpu_img.sampler,
+                            &self.ctx.device, &gpu_img.view, &gpu_img.sampler,
                         );
-                        let vbuf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        let vbuf = self.ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: None,
                             contents: bytemuck::cast_slice(&img_call.verts),
                             usage: wgpu::BufferUsages::VERTEX,
@@ -362,7 +339,7 @@ impl Renderer {
             }
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.ctx.queue.submit(std::iter::once(encoder.finish()));
         output.present();
     }
 }

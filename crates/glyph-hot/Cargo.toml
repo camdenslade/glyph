@@ -1,0 +1,13 @@
+[package]
+name = "glyph-hot"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "glyph_hot"
+
+[dependencies]
+glyph-core  = { path = "../glyph-core" }
+libloading  = "0.8"
+notify      = "6"
+taffy       = "0.5"

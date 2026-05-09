@@ -5,8 +5,10 @@
 //! draws glyph quads sampled from the atlas texture. Rects are submitted
 //! first so text always composites on top.
 
+mod gpu_context;
 mod image_cache;
 mod pipeline;
 mod renderer;
 
+pub use gpu_context::GpuContext;
 pub use renderer::Renderer;

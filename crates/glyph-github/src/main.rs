@@ -160,5 +160,6 @@ fn main() {
 
     let title = format!("glyph — {}", repo);
     let dashboard = Dashboard::new(token, repo);
-    App::run_with_config(move |theme| dashboard.render(theme), glyph_platform::Theme::light(), &title, 900.0, 700.0);
+    let default_theme = glyph_platform::Theme::light();
+    App::run(move |_opener| { let t = default_theme.clone(); let v = dashboard.render(&t); (t, v) }, glyph_platform::Theme::light(), &title, 900.0, 700.0);
 }

@@ -5,7 +5,7 @@ use glyph_core::{
 
 pub struct Checkbox {
     pub checked: Signal<bool>,
-    pub label: String,
+    pub label:   String,
 }
 
 impl Checkbox {
@@ -16,25 +16,28 @@ impl Checkbox {
 
 impl Component for Checkbox {
     fn render(&self, theme: &Theme) -> View {
-        let checked = self.checked.clone();
+        let checked  = self.checked.clone();
         let is_checked = self.checked.get();
+        let box_size = theme.font_size + 8.0;
 
         let tick_color = if is_checked { theme.on_primary } else { Color::TRANSPARENT };
-        let box_bg = if is_checked { theme.primary } else { theme.surface };
-        let _box_border = if is_checked { theme.primary } else { theme.border };
+        let box_bg     = if is_checked { theme.primary } else { theme.border };
 
         row(vec![
-            button(if is_checked { "✓" } else { " " }, move || {
+            button(if is_checked { "✓" } else { "" }, move || {
                 checked.set(!checked.get());
             })
             .bg(box_bg)
             .text_color(tick_color)
             .radius(theme.radius * 0.5)
-            .font_size(theme.font_size * 0.9)
+            .font_size(theme.font_size * 0.85)
+            .width(box_size)
+            .height(box_size)
             .into(),
             text(&self.label, theme.font_size).color(theme.text).into(),
         ])
         .gap(8.0)
+        .auto_size()
         .into()
     }
 }

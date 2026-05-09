@@ -33,12 +33,12 @@ impl Theme {
         Self {
             background:    Color::rgb(1.0, 1.0, 1.0),
             surface:       Color::rgb(0.97, 0.97, 0.97),
-            primary:       Color::rgb(0.1, 0.1, 0.9),
+            primary:       Color::rgb(0.0, 0.47, 1.0),
             on_primary:    Color::WHITE,
             text:          Color::BLACK,
             text_muted:    Color::rgb(0.5, 0.5, 0.5),
             border:        Color::rgb(0.75, 0.75, 0.75),
-            border_focused: Color::rgb(0.2, 0.4, 0.9),
+            border_focused: Color::rgb(0.0, 0.47, 1.0),
             radius:        8.0,
             font_size:     16.0,
         }

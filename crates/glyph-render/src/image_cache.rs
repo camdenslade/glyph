@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use wgpu::util::DeviceExt;
 
 pub struct GpuImage {
@@ -8,20 +9,34 @@ pub struct GpuImage {
 
 /// Loads images from disk on first use and caches their GPU textures.
 pub struct ImageCache {
-    entries: HashMap<String, GpuImage>,
+    entries:  HashMap<String, GpuImage>,
+    asset_dir: PathBuf,
 }
 
 impl ImageCache {
     pub fn new() -> Self {
-        Self { entries: HashMap::new() }
+        // Resolve assets relative to the executable so the app works regardless
+        // of the working directory at launch.
+        let asset_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."));
+        Self { entries: HashMap::new(), asset_dir }
+    }
+
+    fn resolve(&self, path: &str) -> PathBuf {
+        let p = Path::new(path);
+        if p.is_absolute() { p.to_path_buf() } else { self.asset_dir.join(p) }
     }
 
     /// Upload the image at `path` to the GPU if not already cached.
+    /// Relative paths are resolved relative to the executable's directory.
     pub fn preload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) {
         if self.entries.contains_key(path) {
             return;
         }
-        let Ok(img) = image::open(path) else { return };
+        let resolved = self.resolve(path);
+        let Ok(img) = image::open(&resolved) else { return };
         let img = img.into_rgba8();
         let (w, h) = img.dimensions();
         let texture = device.create_texture_with_data(

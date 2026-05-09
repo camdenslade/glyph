@@ -11,6 +11,17 @@ pub struct Color {
     pub a: f32,
 }
 
+/// Types that can be linearly interpolated between two values.
+pub trait Lerp: Clone + Send + 'static {
+    fn lerp(a: &Self, b: &Self, t: f32) -> Self;
+}
+
+impl Lerp for f32 {
+    fn lerp(a: &f32, b: &f32, t: f32) -> f32 {
+        a + (b - a) * t
+    }
+}
+
 impl Color {
     pub const WHITE: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
     pub const BLACK: Color = Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
@@ -31,6 +42,17 @@ pub struct Shadow {
     pub offset_y: f32,
     pub blur: f32,
     pub color: Color,
+}
+
+impl Lerp for Color {
+    fn lerp(a: &Color, b: &Color, t: f32) -> Color {
+        Color {
+            r: a.r + (b.r - a.r) * t,
+            g: a.g + (b.g - a.g) * t,
+            b: a.b + (b.b - a.b) * t,
+            a: a.a + (b.a - a.a) * t,
+        }
+    }
 }
 
 impl Shadow {
@@ -110,6 +132,11 @@ pub enum View {
     ZStack {
         children: Vec<View>,
         style: Style,
+        bg_color: Option<Color>,
+        border_color: Option<Color>,
+        border_width: f32,
+        corner_radius: f32,
+        shadow: Option<Shadow>,
     },
     /// A clipped, scrollable region. The child is laid out at its natural size;
     /// `offset_x` and `offset_y` shift content within the viewport.
@@ -130,16 +157,19 @@ pub enum View {
         style: Style,
     },
     /// A single-line text input field. `value` holds the current string;
-    /// `focused` is true when this field has keyboard focus.
+    /// `focused` is true when this field has keyboard focus;
+    /// `cursor` is the byte offset of the insertion point within `value`.
     TextInput {
         value: Signal<String>,
         focused: Signal<bool>,
+        cursor: Signal<usize>,
         placeholder: String,
         font_size: f32,
         bg_color: Color,
         text_color: Color,
         border_color: Color,
         corner_radius: f32,
+        on_change: Option<Box<dyn Fn(String)>>,
         on_submit: Option<Box<dyn Fn(String)>>,
         style: Style,
     },
@@ -247,6 +277,34 @@ impl ButtonView {
         self
     }
 
+    pub fn width(mut self, w: f32) -> Self {
+        if let View::Button { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::Button { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+
+    pub fn padding(mut self, p: f32) -> Self {
+        if let View::Button { ref mut style, .. } = self.view {
+            style.padding = taffy::Rect::length(p);
+        }
+        self
+    }
+
+    pub fn margin(mut self, m: f32) -> Self {
+        if let View::Button { ref mut style, .. } = self.view {
+            style.margin = taffy::Rect::length(m);
+        }
+        self
+    }
+
     pub fn into_view(self) -> View {
         self.view
     }
@@ -325,6 +383,31 @@ impl ColumnView {
         self
     }
 
+    pub fn padding_x(mut self, p: f32) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            let lp = taffy::LengthPercentage::Length(p);
+            style.padding.left = lp;
+            style.padding.right = lp;
+        }
+        self
+    }
+
+    pub fn padding_y(mut self, p: f32) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            let lp = taffy::LengthPercentage::Length(p);
+            style.padding.top = lp;
+            style.padding.bottom = lp;
+        }
+        self
+    }
+
+    pub fn margin(mut self, m: f32) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            style.margin = taffy::Rect::length(m);
+        }
+        self
+    }
+
     pub fn size(mut self, width: f32, height: f32) -> Self {
         if let View::Column { ref mut style, .. } = self.view {
             style.size = taffy::Size {
@@ -338,6 +421,41 @@ impl ColumnView {
     pub fn width(mut self, w: f32) -> Self {
         if let View::Column { ref mut style, .. } = self.view {
             style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+
+    pub fn min_size(mut self, width: f32, height: f32) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            style.min_size = taffy::Size {
+                width: taffy::Dimension::Length(width),
+                height: taffy::Dimension::Length(height),
+            };
+        }
+        self
+    }
+
+    pub fn max_size(mut self, width: f32, height: f32) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            style.max_size = taffy::Size {
+                width: taffy::Dimension::Length(width),
+                height: taffy::Dimension::Length(height),
+            };
+        }
+        self
+    }
+
+    /// Remove the default 100%×100% size so the column shrinks to its content.
+    pub fn auto_size(mut self) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            style.size = taffy::Size::auto();
         }
         self
     }
@@ -430,6 +548,31 @@ impl RowView {
         self
     }
 
+    pub fn padding_x(mut self, p: f32) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            let lp = taffy::LengthPercentage::Length(p);
+            style.padding.left = lp;
+            style.padding.right = lp;
+        }
+        self
+    }
+
+    pub fn padding_y(mut self, p: f32) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            let lp = taffy::LengthPercentage::Length(p);
+            style.padding.top = lp;
+            style.padding.bottom = lp;
+        }
+        self
+    }
+
+    pub fn margin(mut self, m: f32) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            style.margin = taffy::Rect::length(m);
+        }
+        self
+    }
+
     pub fn size(mut self, width: f32, height: f32) -> Self {
         if let View::Row { ref mut style, .. } = self.view {
             style.size = taffy::Size {
@@ -443,6 +586,41 @@ impl RowView {
     pub fn width(mut self, w: f32) -> Self {
         if let View::Row { ref mut style, .. } = self.view {
             style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+
+    pub fn min_size(mut self, width: f32, height: f32) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            style.min_size = taffy::Size {
+                width: taffy::Dimension::Length(width),
+                height: taffy::Dimension::Length(height),
+            };
+        }
+        self
+    }
+
+    pub fn max_size(mut self, width: f32, height: f32) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            style.max_size = taffy::Size {
+                width: taffy::Dimension::Length(width),
+                height: taffy::Dimension::Length(height),
+            };
+        }
+        self
+    }
+
+    /// Remove the default auto width so the row shrinks to its content.
+    pub fn auto_size(mut self) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            style.size = taffy::Size::auto();
         }
         self
     }
@@ -695,6 +873,13 @@ impl TextInputView {
         self
     }
 
+    pub fn on_change(mut self, f: impl Fn(String) + 'static) -> Self {
+        if let View::TextInput { ref mut on_change, .. } = self.view {
+            *on_change = Some(Box::new(f));
+        }
+        self
+    }
+
     pub fn on_submit(mut self, f: impl Fn(String) + 'static) -> Self {
         if let View::TextInput { ref mut on_submit, .. } = self.view {
             *on_submit = Some(Box::new(f));
@@ -709,19 +894,21 @@ impl From<TextInputView> for View {
     }
 }
 
-/// A single-line text input. `value` and `focused` are shared signals — clone
-/// them to read the current value or observe focus from other components.
-pub fn text_input(value: Signal<String>, focused: Signal<bool>) -> TextInputView {
+/// A single-line text input. `value`, `focused`, and `cursor` are shared signals
+/// that must be owned by the component to persist across frames.
+pub fn text_input(value: Signal<String>, focused: Signal<bool>, cursor: Signal<usize>) -> TextInputView {
     TextInputView {
         view: View::TextInput {
             value,
             focused,
+            cursor,
             placeholder: String::new(),
             font_size: 16.0,
             bg_color: Color::WHITE,
             text_color: Color::BLACK,
             border_color: Color::rgb(0.7, 0.7, 0.7),
             corner_radius: 6.0,
+            on_change: None,
             on_submit: None,
             style: Style {
                 size: taffy::Size {
@@ -763,15 +950,60 @@ impl From<ScrollView> for View {
     }
 }
 
-pub fn zstack(children: Vec<View>) -> View {
-    View::ZStack {
-        children,
-        style: Style {
-            size: taffy::Size {
-                width: taffy::Dimension::Percent(1.0),
-                height: taffy::Dimension::Percent(1.0),
+pub struct ZStackView {
+    view: View,
+}
+
+impl ZStackView {
+    pub fn bg(mut self, color: Color) -> Self {
+        if let View::ZStack { ref mut bg_color, .. } = self.view { *bg_color = Some(color); }
+        self
+    }
+    pub fn border(mut self, color: Color, width: f32) -> Self {
+        if let View::ZStack { ref mut border_color, ref mut border_width, .. } = self.view {
+            *border_color = Some(color); *border_width = width;
+        }
+        self
+    }
+    pub fn radius(mut self, r: f32) -> Self {
+        if let View::ZStack { ref mut corner_radius, .. } = self.view { *corner_radius = r; }
+        self
+    }
+    pub fn shadow(mut self, s: Shadow) -> Self {
+        if let View::ZStack { shadow: ref mut sh, .. } = self.view { *sh = Some(s); }
+        self
+    }
+    pub fn size(mut self, width: f32, height: f32) -> Self {
+        if let View::ZStack { ref mut style, .. } = self.view {
+            style.size = taffy::Size {
+                width: taffy::Dimension::Length(width),
+                height: taffy::Dimension::Length(height),
+            };
+        }
+        self
+    }
+}
+
+impl From<ZStackView> for View {
+    fn from(z: ZStackView) -> Self { z.view }
+}
+
+pub fn zstack(children: Vec<View>) -> ZStackView {
+    ZStackView {
+        view: View::ZStack {
+            children,
+            style: Style {
+                size: taffy::Size {
+                    width: taffy::Dimension::Percent(1.0),
+                    height: taffy::Dimension::Percent(1.0),
+                },
+                ..Default::default()
             },
-            ..Default::default()
+            bg_color: None,
+            border_color: None,
+            border_width: 0.0,
+            corner_radius: 0.0,
+            shadow: None,
         },
     }
 }
