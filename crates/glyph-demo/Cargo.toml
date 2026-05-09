@@ -1,0 +1,12 @@
+[package]
+name = "glyph-demo"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "glyph-demo"
+path = "src/main.rs"
+
+[dependencies]
+glyph-core     = { path = "../glyph-core" }
+glyph-platform = { path = "../glyph-platform" }

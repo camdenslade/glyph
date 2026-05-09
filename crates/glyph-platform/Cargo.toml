@@ -1,0 +1,11 @@
+[package]
+name = "glyph-platform"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glyph-core   = { path = "../glyph-core" }
+glyph-render = { path = "../glyph-render" }
+winit    = "0.30"
+wgpu     = "22"
+pollster = "0.3"

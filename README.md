@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Binate-GPU.png" alt="Binate GPU" width="320" />
+  <img src="Glyph.png" alt="Glyph" width="320" />
 </p>
 
-<h1 align="center">Binate GPU</h1>
+<h1 align="center">Glyph</h1>
 
 <p align="center">
   A GPU-accelerated reactive UI framework for Rust.
@@ -10,12 +10,12 @@
 
 ---
 
-Binate GPU renders UI via custom wgpu pipelines with signal-based reactivity and flexbox layout. Describe your interface as a `View` tree, bind state with `Signal<T>`, and the platform loop redraws automatically on every write. A macOS AppKit bridge is also available for native rendering from the same tree.
+Glyph renders UI via custom wgpu pipelines with signal-based reactivity and flexbox layout. Describe your interface as a `View` tree, bind state with `Signal<T>`, and the platform loop redraws automatically on every write. A macOS AppKit bridge is also available for native rendering from the same tree.
 
 ## Quick Start
 
 ```sh
-cargo run -p binate-gpu-demo
+cargo run -p glyph-demo
 ```
 
 The demo opens an 800x600 window with a reactive counter backed by `Signal<i32>`.
@@ -23,8 +23,8 @@ The demo opens an 800x600 window with a reactive counter backed by `Signal<i32>`
 ## Example
 
 ```rust
-use binate_gpu_core::{Color, FontWeight, Signal, button, column, text};
-use binate_gpu_platform::App;
+use glyph_core::{Color, FontWeight, Signal, button, column, text};
+use glyph_platform::App;
 
 fn main() {
     let count = Signal::new(0i32);
@@ -72,26 +72,33 @@ value.set(value.get() + 1); // triggers a redraw on the next event
 
 | Crate | Role |
 |---|---|
-| `binate-gpu-core` | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
-| `binate-gpu-text` | cosmic-text shaping, glyph atlas, text measurement |
-| `binate-gpu-render` | wgpu pipelines, two-pass renderer |
-| `binate-gpu-platform` | winit event loop, hit-test, click dispatch |
-| `binate-gpu-native` | macOS AppKit bridge (objc2) |
-| `binate-gpu-demo` | Counter app example |
+| `glyph-core` | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
+| `glyph-text` | cosmic-text shaping, glyph atlas, text measurement |
+| `glyph-render` | wgpu pipelines, rect/text/image renderer |
+| `glyph-platform` | winit event loop, hit-test, click/hover/scroll dispatch |
+| `glyph-native` | macOS AppKit bridge (objc2) |
+| `glyph-widgets` | pre-built widgets: Checkbox, Toggle, Slider, RadioGroup, Select |
+| `glyph-demo` | interactive demo app |
+| `glyph-github` | GitHub dashboard example |
 
 ## Status
 
 | Feature | Status |
 |---|---|
-| GPU rect + text rendering | Working |
+| GPU rect + text + image rendering | Working |
 | Signal-driven redraws | Working |
 | Flexbox layout (Taffy) | Working |
-| Mouse hit-test + click | Working |
-| macOS native bridge | Compiles, no demo yet |
-| Scrolling | Not implemented |
-| Text input | Not implemented |
+| Text wrapping | Working |
+| Mouse hit-test, click, hover, scroll | Working |
+| Text input with on_submit | Working |
+| Container backgrounds, borders, shadows | Working |
+| Clip regions | Working |
+| ZStack / flex grow / spacer | Working |
+| Widget system (Component + Widget traits) | Working |
+| macOS AppKit native bridge | Working |
 | Linux / Windows | wgpu handles backends; platform layer untested |
-| Component model | Not implemented |
+| Custom fonts | Not implemented |
+| Multi-window | Not implemented |
 | Hot-reload | Not implemented |
 
 ## License

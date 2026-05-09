@@ -1,0 +1,11 @@
+[package]
+name = "glyph-render"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glyph-core = { path = "../glyph-core" }
+glyph-text = { path = "../glyph-text" }
+wgpu = "22"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

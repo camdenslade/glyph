@@ -1,10 +1,12 @@
 [workspace]
 members = [
-    "crates/binate-gpu-core",
-    "crates/binate-gpu-render",
-    "crates/binate-gpu-text",
-    "crates/binate-gpu-platform",
-    "crates/binate-gpu-native",
-    "crates/binate-gpu-demo",
+    "crates/glyph-core",
+    "crates/glyph-render",
+    "crates/glyph-text",
+    "crates/glyph-platform",
+    "crates/glyph-native",
+    "crates/glyph-demo",
+    "crates/glyph-github",
+    "crates/glyph-widgets",
 ]
 resolver = "2"

@@ -1,0 +1,7 @@
+[package]
+name = "glyph-widgets"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glyph-core = { path = "../glyph-core" }
