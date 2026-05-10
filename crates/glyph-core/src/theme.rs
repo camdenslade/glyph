@@ -32,7 +32,7 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             background:    Color::rgb(1.0, 1.0, 1.0),
-            surface:       Color::rgb(0.97, 0.97, 0.97),
+            surface:       Color::rgb(0.94, 0.94, 0.96),
             primary:       Color::rgb(0.0, 0.47, 1.0),
             on_primary:    Color::WHITE,
             text:          Color::BLACK,

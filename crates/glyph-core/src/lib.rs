@@ -23,5 +23,5 @@ pub use theme::Theme;
 pub use view::{
     ButtonView, Color, ColumnView, FontWeight, ImageView, Lerp, RowView, ScrollView, Shadow,
     TextAlign, TextInputView, TextView, View, ZStackView,
-    button, column, flex, flexible, image, list, rect, row, scroll, spacer, text, text_input, zstack,
+    button, column, flex, flexible, image, list, opacity, rect, row, scroll, spacer, text, text_input, zstack,
 };

@@ -39,7 +39,10 @@ fn sdf_rounded_rect(p: vec2<f32>, rect: vec4<f32>, r: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let d     = sdf_rounded_rect(in.clip_pos.xy, in.rect, in.radius);
-    let alpha = 1.0 - smoothstep(-0.5, 0.5, d);
+    let d  = sdf_rounded_rect(in.clip_pos.xy, in.rect, in.radius);
+    // fwidth gives the screen-space derivative of d — exactly 1 physical pixel.
+    // smoothstep over [-fw, fw] produces a perfectly anti-aliased edge at any DPI.
+    let fw = fwidth(d);
+    let alpha = 1.0 - smoothstep(-fw, fw, d);
     return vec4<f32>(in.color.rgb, in.color.a * alpha);
 }

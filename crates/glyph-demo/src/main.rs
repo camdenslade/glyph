@@ -1,6 +1,6 @@
 use glyph_core::{
     Color, Component, Easing, FontWeight, Signal, Theme, Tween, View,
-    button, column, image, row, text, text_input,
+    button, column, image, opacity, row, text, text_input,
 };
 use glyph_platform::{App, WindowOpener};
 use glyph_widgets::{Checkbox, Select, Toggle};
@@ -77,46 +77,64 @@ impl Component for Counter {
         ])
         .auto_size()
         .gap(16.0)
+        .padding(16.0)
+        .bg(theme.surface)
+        .radius(theme.radius)
+        .shadow(glyph_core::Shadow::new(0.0, 1.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 0.15)))
         .into()
     }
 }
 
-/// A button whose background color animates smoothly on hover.
+/// A button with hover and press color animations.
 struct AnimatedButton {
-    bg: Signal<Color>,
-    tween: Tween<Color>,
+    bg:          Signal<Color>,
+    tween:       Tween<Color>,
+    hover_color: Signal<Color>,  // tracks the hover target so press can return to it
 }
 
 impl AnimatedButton {
     fn new(theme: &Theme) -> Self {
         let bg = Signal::new(theme.primary);
-        let tween = Tween::new(bg.clone(), Easing::EaseOut, 0.2);
-        Self { bg, tween }
+        let tween = Tween::new(bg.clone(), Easing::EaseOut, 0.15);
+        Self { bg, tween, hover_color: Signal::new(theme.primary) }
     }
 }
 
 impl Component for AnimatedButton {
     fn render(&self, theme: &Theme) -> View {
         let bg_color = self.bg.get();
-        let hover_target = Color::rgb(
-            (theme.primary.r * 1.3).min(1.0),
-            (theme.primary.g * 1.3).min(1.0),
-            (theme.primary.b * 1.3).min(1.0),
+        let rest    = theme.primary;
+        let hovered = Color::rgb(
+            (rest.r * 1.25).min(1.0),
+            (rest.g * 1.25).min(1.0),
+            (rest.b * 1.25).min(1.0),
         );
-        let rest_color = theme.primary;
-        let tween = self.tween.clone();
-        let tween2 = self.tween.clone();
+        let pressed = Color::rgb(
+            (rest.r * 0.75).min(1.0),
+            (rest.g * 0.75).min(1.0),
+            (rest.b * 0.75).min(1.0),
+        );
+
+        let t1 = self.tween.clone();
+        let t3 = self.tween.clone();
+        let t4 = self.tween.clone();
+        let hc = self.hover_color.clone();
+        let hc2 = self.hover_color.clone();
 
         button("Hover me!", || {})
             .bg(bg_color)
             .text_color(theme.on_primary)
             .radius(theme.radius)
             .font_size(theme.font_size)
-            .on_hover(move |hovered| {
-                if hovered {
-                    tween.start(hover_target);
+            .on_hover(move |is_hovered| {
+                hc.set(if is_hovered { hovered } else { rest });
+                t1.start(if is_hovered { hovered } else { rest });
+            })
+            .on_press(move |is_pressed| {
+                if is_pressed {
+                    t3.start(pressed);
                 } else {
-                    tween2.start(rest_color);
+                    t4.start(hc2.get());
                 }
             })
             .into()
@@ -153,40 +171,70 @@ impl Component for WidgetShowcase {
 }
 
 struct DemoApp {
-    counter:   Counter,
-    search:    SearchBox,
-    anim_btn:  AnimatedButton,
-    widgets:   WidgetShowcase,
-    dark_mode: Signal<bool>,
+    counter:       Counter,
+    search:        SearchBox,
+    anim_btn:      AnimatedButton,
+    widgets:       WidgetShowcase,
+    dark_mode:     Signal<bool>,
+    // Entrance animation — signals and tweens kept alive for the app lifetime.
+    opacities:     Vec<Signal<f32>>,
+    op_tweens:     Vec<Tween<f32>>,
+    entered:       Signal<bool>,
 }
 
 impl DemoApp {
     fn new() -> Self {
         let theme = Theme::light();
         let dark_mode = Signal::new(false);
+        let opacities: Vec<Signal<f32>> = (0..4).map(|_| Signal::new(0.0f32)).collect();
+        let op_tweens: Vec<Tween<f32>> = opacities.iter().enumerate().map(|(i, sig)| {
+            let duration = 0.3 + i as f32 * 0.12;
+            Tween::new(sig.clone(), Easing::EaseOut, duration)
+        }).collect();
+        let entered = Signal::new(false);
         Self {
             counter:   Counter::new(),
             search:    SearchBox::new(),
             anim_btn:  AnimatedButton::new(&theme),
             widgets:   WidgetShowcase::new(dark_mode.clone()),
             dark_mode,
+            opacities,
+            op_tweens,
+            entered,
+        }
+    }
+
+    fn trigger_entrance(&self) {
+        for tween in &self.op_tweens {
+            tween.animate(0.0, 1.0);
         }
     }
 }
 
 impl Component for DemoApp {
     fn render(&self, theme: &Theme) -> View {
+        if !self.entered.get() {
+            self.entered.set(true);
+            self.trigger_entrance();
+        }
+
         let show_counter = self.widgets.show_counter.checked.get();
+        let [a0, a1, a2, a3] = [
+            self.opacities[0].get(),
+            self.opacities[1].get(),
+            self.opacities[2].get(),
+            self.opacities[3].get(),
+        ];
 
         let mut children: Vec<View> = vec![
-            image("Glyph.png").size(120.0, 120.0).radius(12.0).into(),
+            opacity(a0, image("Glyph.png").size(120.0, 120.0).radius(12.0)),
         ];
         if show_counter {
-            children.push(self.counter.into_view(theme));
+            children.push(opacity(a1, self.counter.into_view(theme)));
         }
-        children.push(self.search.into_view(theme));
-        children.push(self.anim_btn.into_view(theme));
-        children.push(self.widgets.into_view(theme));
+        children.push(opacity(a1, self.search.into_view(theme)));
+        children.push(opacity(a2, self.anim_btn.into_view(theme)));
+        children.push(opacity(a3, self.widgets.into_view(theme)));
 
         column(children)
             .justify(glyph_core::JustifyContent::FlexStart)

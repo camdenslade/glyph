@@ -8,7 +8,7 @@ use winit::{
     event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key, NamedKey},
-    window::{Window, WindowId},
+    window::{Cursor, CursorIcon, Window, WindowId},
 };
 
 // ---------------------------------------------------------------------------
@@ -240,22 +240,35 @@ impl ApplicationHandler for App {
                 let (w, h) = (ws.lw(), ws.lh());
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
                 let mut changed = false;
+                let mut icon = CursorIcon::Default;
                 for fv in &flat {
                     let l = fv.layout.location.x;
                     let t = fv.layout.location.y;
                     let hit = px >= l && px <= l + fv.layout.size.width
                            && py >= t && py <= t + fv.layout.size.height;
-                    if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
-                        on_hover(hit);
-                        changed = true;
+                    match &fv.kind {
+                        FlatViewKind::Button { on_hover: Some(on_hover), .. } => {
+                            on_hover(hit);
+                            changed = true;
+                            if hit { icon = CursorIcon::Pointer; }
+                        }
+                        FlatViewKind::Button { .. } => {
+                            if hit { icon = CursorIcon::Pointer; }
+                        }
+                        FlatViewKind::TextInput { .. } => {
+                            if hit { icon = CursorIcon::Text; }
+                        }
+                        _ => {}
                     }
                 }
+                ws.window.set_cursor(Cursor::Icon(icon));
                 if changed { ws.window.request_redraw(); }
                 return;
             }
 
             WindowEvent::CursorLeft { .. } => {
                 let Some(ws) = self.windows.get_mut(&id) else { return };
+                ws.window.set_cursor(Cursor::Icon(CursorIcon::Default));
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
@@ -288,30 +301,48 @@ impl ApplicationHandler for App {
                 return;
             }
 
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
+            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
                 let Some(ws) = self.windows.get_mut(&id) else { return };
                 let (cx, cy) = ws.cursor_pos;
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                let flat = scale_flat(flat, ws.scale());
+                let pressed = state == ElementState::Pressed;
                 let mut clicked = false;
                 for fv in &flat {
                     let l = fv.layout.location.x;
                     let t = fv.layout.location.y;
-                    let hit = cx >= l && cx <= l + fv.layout.size.width
-                           && cy >= t && cy <= t + fv.layout.size.height;
+                    let hit = cx * ws.scale() >= l && cx * ws.scale() <= l + fv.layout.size.width
+                           && cy * ws.scale() >= t && cy * ws.scale() <= t + fv.layout.size.height;
                     match &fv.kind {
-                        FlatViewKind::Button { on_click, .. } => {
-                            if hit && !clicked {
-                                on_click();
-                                clicked = true;
+                        FlatViewKind::Button { on_click, on_press, .. } => {
+                            if hit {
+                                if let Some(op) = on_press {
+                                    op(pressed);
+                                }
+                                if pressed && !clicked {
+                                    on_click();
+                                    clicked = true;
+                                }
+                            } else if !pressed {
+                                // Released outside — still cancel the press state
+                                if let Some(op) = on_press {
+                                    op(false);
+                                }
                             }
                         }
-                        FlatViewKind::TextInput { focused, cursor, value, .. } => {
-                            focused.set(hit);
-                            if hit {
-                                ws.frame = 0;
-                                cursor.set(value.get().len());
+                        FlatViewKind::TextInput { focused, cursor, value, font_size, .. } => {
+                            if pressed {
+                                focused.set(hit);
+                                if hit {
+                                    ws.frame = 0;
+                                    let val = value.get();
+                                    let pad = 8.0;
+                                    let click_offset = (cx * ws.scale() - l - pad * ws.scale()).max(0.0);
+                                    let byte_idx = ws.renderer.cursor_for_x(&val, font_size * ws.scale(), click_offset);
+                                    cursor.set(byte_idx);
+                                }
                             }
                         }
                         _ => {}
@@ -452,8 +483,8 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
         let kind = match fv.kind {
             FlatViewKind::Text { content, font_size, color, weight, align, wrap } =>
                 FlatViewKind::Text { content, font_size: font_size * scale, color, weight, align, wrap },
-            FlatViewKind::Button { label, on_click, on_hover, bg_color, hover_bg_color, text_color, corner_radius, font_size } =>
-                FlatViewKind::Button { label, on_click, on_hover, bg_color, hover_bg_color, text_color, corner_radius: corner_radius * scale, font_size: font_size * scale },
+            FlatViewKind::Button { label, on_click, on_hover, on_press, bg_color, hover_bg_color, press_bg_color, text_color, corner_radius, font_size } =>
+                FlatViewKind::Button { label, on_click, on_hover, on_press, bg_color, hover_bg_color, press_bg_color, text_color, corner_radius: corner_radius * scale, font_size: font_size * scale },
             FlatViewKind::TextInput { value, focused, cursor, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change, on_submit } =>
                 FlatViewKind::TextInput { value, focused, cursor, placeholder, font_size: font_size * scale, bg_color, text_color, border_color, corner_radius: corner_radius * scale, on_change, on_submit },
             FlatViewKind::ContainerRect { bg_color, border_color, border_width, corner_radius, shadow } => {
@@ -529,6 +560,11 @@ fn dispatch_scroll(
         }
         View::Flexible { child, .. } => {
             dispatch_scroll(child, theme, flat, cx, cy, dx, dy, flat_idx);
+        }
+        View::Opacity { child, .. } => {
+            *flat_idx += 1; // OpacityStart
+            dispatch_scroll(child, theme, flat, cx, cy, dx, dy, flat_idx);
+            *flat_idx += 1; // OpacityEnd
         }
         View::Spacer => {}
     }

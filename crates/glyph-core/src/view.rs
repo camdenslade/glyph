@@ -100,8 +100,10 @@ pub enum View {
         label: String,
         on_click: Box<dyn Fn()>,
         on_hover: Option<Box<dyn Fn(bool)>>,
+        on_press: Option<Box<dyn Fn(bool)>>,
         bg_color: Color,
         hover_bg_color: Option<Color>,
+        press_bg_color: Option<Color>,
         text_color: Color,
         corner_radius: f32,
         font_size: f32,
@@ -175,6 +177,12 @@ pub enum View {
     },
     /// Invisible flexible spacer. Fills remaining space along the parent axis.
     Spacer,
+    /// Multiplies the alpha of all descendant colors by `alpha`. Layout is
+    /// pass-through — the child occupies exactly the same space as without this wrapper.
+    Opacity {
+        child: Box<View>,
+        alpha: f32,
+    },
 }
 
 /// Builder returned by [`text`]. Call `.into()` or `.into_view()` to finish.
@@ -252,6 +260,20 @@ impl ButtonView {
     pub fn on_hover(mut self, f: impl Fn(bool) + 'static) -> Self {
         if let View::Button { ref mut on_hover, .. } = self.view {
             *on_hover = Some(Box::new(f));
+        }
+        self
+    }
+
+    pub fn on_press(mut self, f: impl Fn(bool) + 'static) -> Self {
+        if let View::Button { ref mut on_press, .. } = self.view {
+            *on_press = Some(Box::new(f));
+        }
+        self
+    }
+
+    pub fn press_bg(mut self, color: Color) -> Self {
+        if let View::Button { ref mut press_bg_color, .. } = self.view {
+            *press_bg_color = Some(color);
         }
         self
     }
@@ -336,8 +358,10 @@ pub fn button(label: impl Into<String>, on_click: impl Fn() + 'static) -> Button
             label: label.into(),
             on_click: Box::new(on_click),
             on_hover: None,
+            on_press: None,
             bg_color: Color::rgb(0.85, 0.85, 0.85),
             hover_bg_color: None,
+            press_bg_color: None,
             text_color: Color::BLACK,
             corner_radius: 8.0,
             font_size: 16.0,
@@ -924,6 +948,10 @@ pub fn text_input(value: Signal<String>, focused: Signal<bool>, cursor: Signal<u
 /// An invisible spacer that fills remaining space along the parent's main axis.
 pub fn spacer() -> View {
     View::Spacer
+}
+
+pub fn opacity(alpha: f32, child: impl Into<View>) -> View {
+    View::Opacity { child: Box::new(child.into()), alpha }
 }
 
 /// Builder returned by [`scroll`]. Call `.into()` to finish.

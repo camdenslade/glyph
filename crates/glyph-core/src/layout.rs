@@ -32,8 +32,10 @@ pub enum FlatViewKind {
         label: String,
         on_click: Box<dyn Fn()>,
         on_hover: Option<Box<dyn Fn(bool)>>,
+        on_press: Option<Box<dyn Fn(bool)>>,
         bg_color: Color,
         hover_bg_color: Option<Color>,
+        press_bg_color: Option<Color>,
         text_color: Color,
         corner_radius: f32,
         font_size: f32,
@@ -60,6 +62,10 @@ pub enum FlatViewKind {
     },
     /// End the most recent scissor clip region.
     ClipEnd,
+    /// Begin multiplying all descendant colors by this alpha.
+    OpacityStart { alpha: f32 },
+    /// End the most recent opacity scope.
+    OpacityEnd,
     Image {
         path: String,
         corner_radius: f32,
@@ -146,6 +152,10 @@ fn expand(view: View, theme: &Theme) -> View {
             grow,
             shrink,
         },
+        View::Opacity { child, alpha } => View::Opacity {
+            child: Box::new(expand(*child, theme)),
+            alpha,
+        },
         other => other,
     }
 }
@@ -162,6 +172,7 @@ fn get_style(view: &View) -> taffy::Style {
             s
         }
         View::Spacer => taffy::Style { flex_grow: 1.0, flex_shrink: 1.0, ..Default::default() },
+        View::Opacity { child, .. } => get_style(child),
         View::Component(_) => taffy::Style::default(),
     }
 }
@@ -257,6 +268,7 @@ fn build_node(
             taffy.set_style(node, style).ok();
             node
         }
+        View::Opacity { child, .. } => build_node(taffy, child, measure),
         View::Component(_) => unreachable!(),
     }
 }
@@ -284,9 +296,9 @@ fn collect(
                 layout: adjusted,
             });
         }
-        View::Button { label, on_click, on_hover, bg_color, hover_bg_color, text_color, corner_radius, font_size, .. } => {
+        View::Button { label, on_click, on_hover, on_press, bg_color, hover_bg_color, press_bg_color, text_color, corner_radius, font_size, .. } => {
             flat.push(FlatView {
-                kind: FlatViewKind::Button { label, on_click, on_hover, bg_color, hover_bg_color, text_color, corner_radius, font_size },
+                kind: FlatViewKind::Button { label, on_click, on_hover, on_press, bg_color, hover_bg_color, press_bg_color, text_color, corner_radius, font_size },
                 layout: adjusted,
             });
         }
@@ -354,6 +366,11 @@ fn collect(
         }
         View::Flexible { child, .. } => {
             collect(taffy, node, *child, flat, parent_x, parent_y);
+        }
+        View::Opacity { child, alpha } => {
+            flat.push(FlatView { kind: FlatViewKind::OpacityStart { alpha }, layout: adjusted });
+            collect(taffy, node, *child, flat, parent_x, parent_y);
+            flat.push(FlatView { kind: FlatViewKind::OpacityEnd, layout: adjusted });
         }
         View::Component(_) => unreachable!(),
     }

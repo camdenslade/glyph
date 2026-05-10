@@ -23,6 +23,18 @@ pub struct TextVertex {
     pub color: [f32; 4],
 }
 
+/// Vertex for the image pipeline. Carries rect bounds and corner radius so the
+/// fragment shader can SDF-clip rounded corners, matching the rect pipeline.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub struct ImageVertex {
+    pub pos:    [f32; 2],
+    pub uv:     [f32; 2],
+    pub rect:   [f32; 4], // pixel-space bounds [x0, y0, x1, y1]
+    pub radius: f32,
+    pub _pad:   f32,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 pub struct ScreenUniform {
@@ -326,9 +338,14 @@ impl ImagePipeline {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<TextVertex>() as u64,
+                    array_stride: std::mem::size_of::<ImageVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,  // pos
+                        1 => Float32x2,  // uv
+                        2 => Float32x4,  // rect bounds
+                        3 => Float32,    // radius
+                    ],
                 }],
                 compilation_options: Default::default(),
             },
@@ -374,5 +391,112 @@ impl ImagePipeline {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
             ],
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shadow pipeline — analytic Gaussian drop shadows for rounded rects
+// ---------------------------------------------------------------------------
+
+/// One vertex of a shadow quad. All per-shadow data is replicated to every
+/// vertex so the fragment shader can compute the analytic coverage at each pixel.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub struct ShadowVertex {
+    pub pos:    [f32; 2],
+    pub rect:   [f32; 4], // shadow rect bounds (not expanded) in pixel space
+    pub params: [f32; 2], // [radius, sigma]
+    pub color:  [f32; 4],
+}
+
+pub struct ShadowPipeline {
+    pub pipeline:   wgpu::RenderPipeline,
+    pub bind_group: wgpu::BindGroup,
+    pub screen_buf: wgpu::Buffer,
+}
+
+impl ShadowPipeline {
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: f32, height: f32) -> Self {
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/shadow.wgsl"));
+
+        let screen_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("shadow_screen_uniform"),
+            contents: bytemuck::cast_slice(&[ScreenUniform { size: [width, height] }]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow_bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow_bg"),
+            layout: &bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: screen_buf.as_entire_binding(),
+            }],
+        });
+
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("shadow_layout"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadow_pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ShadowVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,  // pos
+                        1 => Float32x4,  // rect
+                        2 => Float32x2,  // params: [radius, sigma]
+                        3 => Float32x4,  // color
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        Self { pipeline, bind_group, screen_buf }
+    }
+
+    pub fn update_screen(&self, queue: &wgpu::Queue, width: f32, height: f32) {
+        queue.write_buffer(
+            &self.screen_buf,
+            0,
+            bytemuck::cast_slice(&[ScreenUniform { size: [width, height] }]),
+        );
     }
 }

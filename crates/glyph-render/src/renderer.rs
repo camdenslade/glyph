@@ -1,15 +1,10 @@
 use crate::gpu_context::GpuContext;
 use crate::image_cache::ImageCache;
-use crate::pipeline::{ImagePipeline, RectPipeline, RectVertex, TextPipeline, TextVertex};
+use crate::pipeline::{ImagePipeline, ImageVertex, RectPipeline, RectVertex, ShadowPipeline, ShadowVertex, TextPipeline, TextVertex};
 use glyph_core::{Color, FlatView, FlatViewKind, FontWeight, TextAlign};
 use glyph_text::{GlyphAtlas, TextRenderer, measure_text};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
-
-// Shadow is approximated by drawing a slightly expanded, blurred rect behind the container.
-// True Gaussian blur requires a separate render pass; we approximate with a semi-transparent
-// expanded rect which is cheap and visually acceptable for UI drop shadows.
-const SHADOW_STEPS: u32 = 4;
 
 /// Per-window GPU resources. The device and queue live in the shared
 /// `GpuContext`; the surface, pipelines, atlas, and image cache are
@@ -19,6 +14,7 @@ pub struct Renderer {
     pub surface:       wgpu::Surface<'static>,
     pub surface_cfg:   wgpu::SurfaceConfiguration,
     rect_pipeline:     RectPipeline,
+    shadow_pipeline:   ShadowPipeline,
     text_pipeline:     TextPipeline,
     image_pipeline:    ImagePipeline,
     atlas:             GlyphAtlas,
@@ -29,7 +25,7 @@ pub struct Renderer {
 
 struct ImageCall {
     path: String,
-    verts: Vec<TextVertex>,
+    verts: Vec<ImageVertex>,
 }
 
 // A scissored draw batch. Each ClipStart flushes the previous batch and
@@ -37,6 +33,7 @@ struct ImageCall {
 struct DrawBatch {
     scissor: Option<[u32; 4]>,
     cursor_visible: bool,
+    shadow_verts: Vec<ShadowVertex>,
     rect_verts: Vec<RectVertex>,
     text_verts: Vec<TextVertex>,
     image_calls: Vec<ImageCall>,
@@ -44,11 +41,11 @@ struct DrawBatch {
 
 impl DrawBatch {
     fn new(scissor: Option<[u32; 4]>, cursor_visible: bool) -> Self {
-        Self { scissor, cursor_visible, rect_verts: Vec::new(), text_verts: Vec::new(), image_calls: Vec::new() }
+        Self { scissor, cursor_visible, shadow_verts: Vec::new(), rect_verts: Vec::new(), text_verts: Vec::new(), image_calls: Vec::new() }
     }
 
     fn is_empty(&self) -> bool {
-        self.rect_verts.is_empty() && self.text_verts.is_empty() && self.image_calls.is_empty()
+        self.shadow_verts.is_empty() && self.rect_verts.is_empty() && self.text_verts.is_empty() && self.image_calls.is_empty()
     }
 }
 
@@ -63,15 +60,16 @@ impl Renderer {
         let width = surface_cfg.width as f32;
         let height = surface_cfg.height as f32;
 
-        let rect_pipeline  = RectPipeline::new(device, format, width, height);
-        let text_pipeline  = TextPipeline::new(device, format, width, height);
-        let image_pipeline = ImagePipeline::new(device, format, width, height);
-        let atlas          = GlyphAtlas::new(device);
-        let text_renderer  = TextRenderer::new();
+        let rect_pipeline   = RectPipeline::new(device, format, width, height);
+        let shadow_pipeline = ShadowPipeline::new(device, format, width, height);
+        let text_pipeline   = TextPipeline::new(device, format, width, height);
+        let image_pipeline  = ImagePipeline::new(device, format, width, height);
+        let atlas           = GlyphAtlas::new(device);
+        let text_renderer   = TextRenderer::new();
         let atlas_bind_group = text_pipeline.make_atlas_bind_group(device, &atlas.view, &atlas.sampler);
-        let image_cache    = ImageCache::new();
+        let image_cache     = ImageCache::new();
 
-        Self { ctx, surface, surface_cfg, rect_pipeline, text_pipeline, image_pipeline, atlas, text_renderer, atlas_bind_group, image_cache }
+        Self { ctx, surface, surface_cfg, rect_pipeline, shadow_pipeline, text_pipeline, image_pipeline, atlas, text_renderer, atlas_bind_group, image_cache }
     }
 
     /// Returns a closure suitable for passing to `ViewTree::build` as the measure function.
@@ -79,6 +77,33 @@ impl Renderer {
         |text, font_size, max_width| {
             measure_text(self.text_renderer.font_system_mut(), text, font_size, max_width)
         }
+    }
+
+    /// Given a string and a click x offset (relative to the text origin), return
+    /// the byte index of the character boundary closest to that x position.
+    pub fn cursor_for_x(&mut self, text: &str, font_size: f32, click_x: f32) -> usize {
+        let mut best_idx = 0;
+        let mut best_dist = f32::MAX;
+        // Check position before each char and after the last one.
+        let boundaries: Vec<usize> = std::iter::once(0)
+            .chain(text.char_indices().map(|(i, _)| i))
+            .chain(std::iter::once(text.len()))
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for idx in boundaries {
+            let prefix_w = if idx == 0 {
+                0.0
+            } else {
+                measure_text(self.text_renderer.font_system_mut(), &text[..idx], font_size, 4096.0).0
+            };
+            let dist = (prefix_w - click_x).abs();
+            if dist < best_dist {
+                best_dist = dist;
+                best_idx = idx;
+            }
+        }
+        best_idx
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -89,6 +114,7 @@ impl Renderer {
         self.surface_cfg.height = height;
         self.surface.configure(&self.ctx.device, &self.surface_cfg);
         self.rect_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
+        self.shadow_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
         self.text_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
         self.image_pipeline.update_screen(&self.ctx.queue, width as f32, height as f32);
     }
@@ -102,12 +128,25 @@ impl Renderer {
 
         let mut batches: Vec<DrawBatch> = Vec::new();
         let mut clip_stack: Vec<Option<[u32; 4]>> = vec![None];
+        let mut opacity_stack: Vec<f32> = Vec::new();
         let mut current = DrawBatch::new(None, cursor_visible);
 
-        push_rect(&mut current.rect_verts, 0.0, 0.0, sw, sh, bg, 0.0);
+        let current_alpha = |stack: &Vec<f32>| -> f32 {
+            stack.iter().fold(1.0_f32, |a, &b| a * b)
+        };
+        let with_alpha = |mut c: Color, stack: &Vec<f32>| -> Color {
+            c.a *= current_alpha(stack);
+            c
+        };
 
         for fv in views {
             match fv.kind {
+                FlatViewKind::OpacityStart { alpha } => {
+                    opacity_stack.push(alpha);
+                }
+                FlatViewKind::OpacityEnd => {
+                    opacity_stack.pop();
+                }
                 FlatViewKind::ClipStart { x, y, width, height } => {
                     batches.push(current);
                     let scissor = scissor_rect(x, y, width, height, sw, sh);
@@ -127,12 +166,12 @@ impl Renderer {
 
                     match fv.kind {
                         FlatViewKind::Rect { color } => {
-                            push_rect(&mut current.rect_verts, l, t, fw, fh, color, 0.0);
+                            push_rect(&mut current.rect_verts, l, t, fw, fh, with_alpha(color, &opacity_stack), 0.0);
                         }
                         FlatViewKind::Button { label, bg_color, hover_bg_color, text_color, corner_radius, font_size, .. } => {
-                            let draw_bg = hover_bg_color.unwrap_or(bg_color);
+                            let draw_bg = with_alpha(hover_bg_color.unwrap_or(bg_color), &opacity_stack);
+                            let text_color = with_alpha(text_color, &opacity_stack);
                             push_rect(&mut current.rect_verts, l, t, fw, fh, draw_bg, corner_radius);
-                            // Measure the text to vertically center it within the button bounds.
                             let (_, th) = self.text_renderer.measure(&label, font_size, fw);
                             let text_y = t + (fh - th) * 0.5;
                             let quads = self.text_renderer.shape(
@@ -148,6 +187,7 @@ impl Renderer {
                             }
                         }
                         FlatViewKind::Text { content, font_size, color, weight, align, wrap } => {
+                            let color = with_alpha(color, &opacity_stack);
                             let max_w = if wrap { fw } else { fw.max(sw) };
                             let quads = self.text_renderer.shape(
                                 &mut self.atlas, &self.ctx.queue, &content, font_size,
@@ -164,18 +204,18 @@ impl Renderer {
                             value, focused, cursor, placeholder,
                             font_size, bg_color, text_color, border_color, corner_radius, ..
                         } => {
+                            let a = current_alpha(&opacity_stack);
+                            let bg_color   = Color { a: bg_color.a * a,   ..bg_color };
+                            let text_color = Color { a: text_color.a * a, ..text_color };
+                            let border_color = Color { a: border_color.a * a, ..border_color };
                             let is_focused = focused.get();
                             let val = value.get();
 
-                            // Background
                             push_rect(&mut current.rect_verts, l, t, fw, fh, bg_color, corner_radius);
-
-                            // Border: draw a slightly larger rect behind background for a 1px border effect
                             push_rect(&mut current.rect_verts, l - 1.0, t - 1.0, fw + 2.0, fh + 2.0,
-                                if is_focused { Color::rgb(0.0, 0.47, 1.0) } else { border_color },
+                                if is_focused { Color { a: a, ..Color::rgb(0.0, 0.47, 1.0) } } else { border_color },
                                 corner_radius + 1.0,
                             );
-                            // Redraw bg on top of border
                             push_rect(&mut current.rect_verts, l, t, fw, fh, bg_color, corner_radius);
 
                             let pad = 8.0;
@@ -183,7 +223,7 @@ impl Renderer {
                             let text_y = t + (fh - font_size) / 2.0;
 
                             let (display, color) = if val.is_empty() {
-                                (placeholder.clone(), Color::rgb(0.6, 0.6, 0.6))
+                                (placeholder.clone(), Color { a: 0.6 * a, ..Color::rgb(0.6, 0.6, 0.6) })
                             } else {
                                 (val.clone(), text_color)
                             };
@@ -202,7 +242,6 @@ impl Renderer {
                                 }
                             }
 
-                            // Cursor at the stored byte position within the text.
                             if is_focused && current.cursor_visible {
                                 let cur = cursor.get().min(val.len());
                                 let prefix = &val[..cur];
@@ -218,35 +257,28 @@ impl Renderer {
                             }
                         }
                         FlatViewKind::ContainerRect { bg_color, border_color, border_width, corner_radius, shadow } => {
+                            let a = current_alpha(&opacity_stack);
                             if let Some(sh) = shadow {
-                                // Approximate shadow with layered semi-transparent rects
-                                for i in 0..SHADOW_STEPS {
-                                    let t = (i + 1) as f32 / SHADOW_STEPS as f32;
-                                    let expand = sh.blur * t;
-                                    let alpha = sh.color.a * (1.0 - t) * 0.4;
-                                    let sc = Color::rgba(sh.color.r, sh.color.g, sh.color.b, alpha);
-                                    push_rect(
-                                        &mut current.rect_verts,
-                                        l + sh.offset_x - expand,
-                                        t + sh.offset_y - expand,
-                                        fw + expand * 2.0,
-                                        fh + expand * 2.0,
-                                        sc,
-                                        corner_radius + expand,
-                                    );
-                                }
+                                let shadow_color = Color { a: sh.color.a * a, ..sh.color };
+                                push_shadow(
+                                    &mut current.shadow_verts,
+                                    l + sh.offset_x, t + sh.offset_y, fw, fh,
+                                    corner_radius, sh.blur, shadow_color,
+                                );
                             }
                             if let Some(bc) = border_color {
                                 push_rect(&mut current.rect_verts, l - border_width, t - border_width,
-                                    fw + border_width * 2.0, fh + border_width * 2.0, bc, corner_radius + border_width);
+                                    fw + border_width * 2.0, fh + border_width * 2.0,
+                                    Color { a: bc.a * a, ..bc }, corner_radius + border_width);
                             }
                             if let Some(bg) = bg_color {
-                                push_rect(&mut current.rect_verts, l, t, fw, fh, bg, corner_radius);
+                                push_rect(&mut current.rect_verts, l, t, fw, fh,
+                                    Color { a: bg.a * a, ..bg }, corner_radius);
                             }
                         }
-                        FlatViewKind::Image { path, .. } => {
+                        FlatViewKind::Image { path, corner_radius } => {
                             let mut verts = Vec::new();
-                            push_image_quad(&mut verts, l, t, fw, fh);
+                            push_image_quad(&mut verts, l, t, fw, fh, corner_radius);
                             current.image_calls.push(ImageCall { path, verts });
                         }
                         _ => {}
@@ -292,6 +324,18 @@ impl Renderer {
                     rp.set_scissor_rect(sx, sy, sw, sh);
                 } else {
                     rp.set_scissor_rect(0, 0, self.surface_cfg.width, self.surface_cfg.height);
+                }
+
+                if !batch.shadow_verts.is_empty() {
+                    let vbuf = self.ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        contents: bytemuck::cast_slice(&batch.shadow_verts),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+                    rp.set_pipeline(&self.shadow_pipeline.pipeline);
+                    rp.set_bind_group(0, &self.shadow_pipeline.bind_group, &[]);
+                    rp.set_vertex_buffer(0, vbuf.slice(..));
+                    rp.draw(0..batch.shadow_verts.len() as u32, 0..1);
                 }
 
                 if !batch.rect_verts.is_empty() {
@@ -367,15 +411,34 @@ fn push_rect(verts: &mut Vec<RectVertex>, x: f32, y: f32, w: f32, h: f32, color:
     ]);
 }
 
-fn push_image_quad(verts: &mut Vec<TextVertex>, x: f32, y: f32, w: f32, h: f32) {
-    let c = [1.0f32, 1.0, 1.0, 1.0];
+fn push_shadow(verts: &mut Vec<ShadowVertex>, x: f32, y: f32, w: f32, h: f32, radius: f32, blur: f32, color: Color) {
+    // Expand the quad by 4σ on each side so the Gaussian tail fully fades out.
+    let sigma = blur * 0.5;
+    let expand = sigma * 4.0;
+    let (qx, qy) = (x - expand, y - expand);
+    let (qw, qh) = (w + expand * 2.0, h + expand * 2.0);
+    let rect = [x, y, x + w, y + h];
+    let c = [color.r, color.g, color.b, color.a];
+    let params = [radius, sigma];
     verts.extend_from_slice(&[
-        TextVertex { pos: [x,     y    ], uv: [0.0, 0.0], color: c },
-        TextVertex { pos: [x + w, y    ], uv: [1.0, 0.0], color: c },
-        TextVertex { pos: [x,     y + h], uv: [0.0, 1.0], color: c },
-        TextVertex { pos: [x + w, y    ], uv: [1.0, 0.0], color: c },
-        TextVertex { pos: [x + w, y + h], uv: [1.0, 1.0], color: c },
-        TextVertex { pos: [x,     y + h], uv: [0.0, 1.0], color: c },
+        ShadowVertex { pos: [qx,      qy     ], rect, params, color: c },
+        ShadowVertex { pos: [qx + qw, qy     ], rect, params, color: c },
+        ShadowVertex { pos: [qx,      qy + qh], rect, params, color: c },
+        ShadowVertex { pos: [qx + qw, qy     ], rect, params, color: c },
+        ShadowVertex { pos: [qx + qw, qy + qh], rect, params, color: c },
+        ShadowVertex { pos: [qx,      qy + qh], rect, params, color: c },
+    ]);
+}
+
+fn push_image_quad(verts: &mut Vec<ImageVertex>, x: f32, y: f32, w: f32, h: f32, radius: f32) {
+    let r = [x, y, x + w, y + h];
+    verts.extend_from_slice(&[
+        ImageVertex { pos: [x,     y    ], uv: [0.0, 0.0], rect: r, radius, _pad: 0.0 },
+        ImageVertex { pos: [x + w, y    ], uv: [1.0, 0.0], rect: r, radius, _pad: 0.0 },
+        ImageVertex { pos: [x,     y + h], uv: [0.0, 1.0], rect: r, radius, _pad: 0.0 },
+        ImageVertex { pos: [x + w, y    ], uv: [1.0, 0.0], rect: r, radius, _pad: 0.0 },
+        ImageVertex { pos: [x + w, y + h], uv: [1.0, 1.0], rect: r, radius, _pad: 0.0 },
+        ImageVertex { pos: [x,     y + h], uv: [0.0, 1.0], rect: r, radius, _pad: 0.0 },
     ]);
 }
 
