@@ -1,6 +1,6 @@
 use glyph_core::{
     Color, Component, Easing, FontWeight, Signal, Theme, Tween, View,
-    button, column, image, opacity, row, text, text_input,
+    button, column, image, opacity, rect, row, scroll, spacer, text, text_area, text_input, virtual_list,
 };
 use glyph_platform::{App, WindowOpener};
 use glyph_widgets::{Checkbox, Select, Toggle};
@@ -170,16 +170,168 @@ impl Component for WidgetShowcase {
     }
 }
 
+struct NoteEditor {
+    value:    Signal<String>,
+    focused:  Signal<bool>,
+    cursor:   Signal<usize>,
+    scroll_y: Signal<f32>,
+}
+
+impl NoteEditor {
+    fn new() -> Self {
+        Self {
+            value:    Signal::new(String::new()),
+            focused:  Signal::new(false),
+            cursor:   Signal::new(0),
+            scroll_y: Signal::new(0.0),
+        }
+    }
+}
+
+impl Component for NoteEditor {
+    fn render(&self, theme: &Theme) -> View {
+        column(vec![
+            text("Notes", theme.font_size).color(theme.text).weight(FontWeight::Bold).into(),
+            rect(theme.border).fill_width().height(1.0).into(),
+            text_area(self.value.clone(), self.focused.clone(), self.cursor.clone(), self.scroll_y.clone())
+                .placeholder("Type your notes here...")
+                .bg(theme.background)
+                .text_color(theme.text)
+                .border_color(theme.border_focused)
+                .radius(theme.radius)
+                .font_size(theme.font_size)
+                .width(320.0)
+                .height(120.0)
+                .into(),
+        ])
+        .auto_size()
+        .gap(10.0)
+        .padding(16.0)
+        .bg(theme.surface)
+        .radius(theme.radius)
+        .shadow(glyph_core::Shadow::new(0.0, 1.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 0.1)))
+        .into()
+    }
+}
+
+struct VirtualDemo {
+    offset_y: Signal<f32>,
+}
+
+impl VirtualDemo {
+    fn new() -> Self {
+        Self { offset_y: Signal::new(0.0) }
+    }
+}
+
+impl Component for VirtualDemo {
+    fn render(&self, theme: &Theme) -> View {
+        let offset_y = self.offset_y.clone();
+        let border = theme.border;
+        let text_color = theme.text;
+        let text_muted = theme.text_muted;
+        column(vec![
+            text("Virtual List", theme.font_size).color(theme.text).weight(FontWeight::Bold).into(),
+            rect(theme.border).fill_width().height(1.0).into(),
+            virtual_list(1000, 44.0, offset_y, 220.0, move |i| {
+                column(vec![
+                    row(vec![
+                        text(format!("Item {}", i + 1), 14.0).color(text_color).weight(FontWeight::Bold).into(),
+                        spacer(),
+                        text(format!("#{:04}", i + 1), 12.0).color(text_muted).into(),
+                    ])
+                    .fill_width()
+                    .auto_size()
+                    .into(),
+                    rect(border).fill_width().height(1.0).into(),
+                ])
+                .fill_width()
+                .auto_size()
+                .justify(glyph_core::JustifyContent::FlexStart)
+                .gap(0.0)
+                .padding_x(12.0)
+                .padding_y(10.0)
+                .into()
+            })
+            .width(320.0)
+            .into(),
+        ])
+        .auto_size()
+        .gap(10.0)
+        .padding(16.0)
+        .bg(theme.surface)
+        .radius(theme.radius)
+        .shadow(glyph_core::Shadow::new(0.0, 1.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 0.1)))
+        .into()
+    }
+}
+
+struct RouterDemo {
+    stack: Signal<usize>, // 0 = home, 1 = detail
+}
+
+impl RouterDemo {
+    fn new() -> Self {
+        Self { stack: Signal::new(0) }
+    }
+
+    fn render_view(&self, theme: &Theme, opener: &WindowOpener) -> View {
+        let page = self.stack.get();
+        let s1 = self.stack.clone();
+        let s2 = self.stack.clone();
+        let o = opener.clone();
+
+        let content: View = match page {
+            0 => column(vec![
+                text("Home", 20.0).color(theme.text).weight(FontWeight::Bold).into(),
+                text("A simple in-place push, or open a whole new window.", theme.font_size).color(theme.text_muted).wrap().into(),
+                row(vec![
+                    button("Detail page", move || { s1.set(1); })
+                        .bg(theme.primary).text_color(theme.on_primary).radius(theme.radius).into(),
+                    button("New window", move || {
+                        o.open(|op| {
+                            let t = Theme::dark();
+                            (t.clone(), second_window(&t, op))
+                        }, "Detail", 500.0, 350.0, Theme::dark());
+                    })
+                    .bg(theme.surface).text_color(theme.text).radius(theme.radius).into(),
+                ])
+                .auto_size().gap(8.0).into(),
+            ]).auto_size().gap(10.0).into(),
+            _ => column(vec![
+                text("Detail", 20.0).color(theme.text).weight(FontWeight::Bold).into(),
+                text("Pushed onto the stack. Hit Back to return.", theme.font_size).color(theme.text_muted).wrap().into(),
+                button("Back", move || { s2.set(0); })
+                    .bg(theme.surface).text_color(theme.text).radius(theme.radius).into(),
+            ]).auto_size().gap(10.0).into(),
+        };
+
+        column(vec![content])
+            .auto_size()
+            .gap(10.0)
+            .padding(16.0)
+            .bg(theme.surface)
+            .radius(theme.radius)
+            .shadow(glyph_core::Shadow::new(0.0, 1.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 0.15)))
+            .into()
+    }
+}
+
 struct DemoApp {
     counter:       Counter,
     search:        SearchBox,
     anim_btn:      AnimatedButton,
     widgets:       WidgetShowcase,
     dark_mode:     Signal<bool>,
-    // Entrance animation — signals and tweens kept alive for the app lifetime.
     opacities:     Vec<Signal<f32>>,
     op_tweens:     Vec<Tween<f32>>,
     entered:       Signal<bool>,
+    note_editor:   NoteEditor,
+    virtual_demo:  VirtualDemo,
+    router_demo:   RouterDemo,
+    scroll_y:      Signal<f32>,
+    scroll_x:      Signal<f32>,
+    max_scroll:    Signal<(f32, f32)>,
 }
 
 impl DemoApp {
@@ -193,14 +345,20 @@ impl DemoApp {
         }).collect();
         let entered = Signal::new(false);
         Self {
-            counter:   Counter::new(),
-            search:    SearchBox::new(),
-            anim_btn:  AnimatedButton::new(&theme),
-            widgets:   WidgetShowcase::new(dark_mode.clone()),
+            counter:      Counter::new(),
+            search:       SearchBox::new(),
+            anim_btn:     AnimatedButton::new(&theme),
+            widgets:      WidgetShowcase::new(dark_mode.clone()),
             dark_mode,
             opacities,
             op_tweens,
             entered,
+            note_editor:  NoteEditor::new(),
+            virtual_demo: VirtualDemo::new(),
+            router_demo:  RouterDemo::new(),
+            scroll_y:     Signal::new(0.0),
+            scroll_x:     Signal::new(0.0),
+            max_scroll:   Signal::new((0.0, 0.0)),
         }
     }
 
@@ -211,8 +369,8 @@ impl DemoApp {
     }
 }
 
-impl Component for DemoApp {
-    fn render(&self, theme: &Theme) -> View {
+impl DemoApp {
+    fn render(&self, theme: &Theme, opener: &WindowOpener) -> View {
         if !self.entered.get() {
             self.entered.set(true);
             self.trigger_entrance();
@@ -235,12 +393,18 @@ impl Component for DemoApp {
         children.push(opacity(a1, self.search.into_view(theme)));
         children.push(opacity(a2, self.anim_btn.into_view(theme)));
         children.push(opacity(a3, self.widgets.into_view(theme)));
+        children.push(opacity(a3, self.note_editor.into_view(theme)));
+        children.push(opacity(a3, self.virtual_demo.into_view(theme)));
+        children.push(opacity(a3, self.router_demo.render_view(theme, opener)));
 
-        column(children)
+        let inner = column(children)
             .justify(glyph_core::JustifyContent::FlexStart)
             .gap(16.0)
             .padding_y(32.0)
-            .into()
+            .padding_x(32.0)
+            .fill_width()
+            .into();
+        scroll(inner, self.scroll_x.clone(), self.scroll_y.clone(), self.max_scroll.clone()).into()
     }
 }
 
@@ -264,24 +428,7 @@ fn main() {
     App::run(
         move |opener| {
             let theme = if dark_signal.get() { Theme::dark() } else { Theme::light() };
-            let opener2 = opener.clone();
-            let t = theme.clone();
-            let mut view = app.render(&theme);
-            if let View::Column { ref mut children, .. } = view {
-                children.push(
-                    button("Open Second Window", move || {
-                        let t2 = t.clone();
-                        opener2.open(
-                            move |_op| (t2.clone(), second_window(&t2, _op)),
-                            "Second Window", 400.0, 250.0, Theme::light(),
-                        );
-                    })
-                    .bg(theme.surface)
-                    .text_color(theme.text)
-                    .radius(theme.radius)
-                    .into(),
-                );
-            }
+            let view = app.render(&theme, opener);
             (theme, view)
         },
         Theme::light(),

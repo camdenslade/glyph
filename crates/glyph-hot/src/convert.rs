@@ -228,17 +228,9 @@ pub unsafe fn cdesc_to_view(
         CViewTag::Rect => {
             let d = &*(desc.data as *const CRectData);
             let mut v = rect(ccolor(d.color));
-            if d.width != 0.0 || d.height != 0.0 {
-                if let View::Rect { ref mut style, .. } = v {
-                    if d.width != 0.0 {
-                        style.size.width = ::taffy::Dimension::Length(d.width);
-                    }
-                    if d.height != 0.0 {
-                        style.size.height = ::taffy::Dimension::Length(d.height);
-                    }
-                }
-            }
-            v
+            if d.width != 0.0 { v = v.width(d.width); }
+            if d.height != 0.0 { v = v.height(d.height); }
+            v.into()
         }
 
         CViewTag::Text => {
@@ -330,7 +322,7 @@ pub unsafe fn cdesc_to_view(
                 .cloned()
                 .unwrap_or_else(|| Signal::new(0.0f32));
 
-            let mut sv = scroll(child, ox, oy);
+            let mut sv = scroll(child, ox, oy, Signal::new((0.0f32, 0.0f32)));
             if d.width != 0.0 && d.height != 0.0 {
                 sv = sv.size(d.width, d.height);
             }

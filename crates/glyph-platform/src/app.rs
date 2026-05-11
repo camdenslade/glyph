@@ -1,4 +1,4 @@
-use glyph_core::{FlatView, FlatViewKind, Theme, View, ViewTree, clear_redraw, needs_redraw, tick_tweens};
+use glyph_core::{FlatView, FlatViewKind, Signal, Theme, View, ViewTree, clear_redraw, needs_redraw, tick_tweens};
 use glyph_render::{GpuContext, Renderer};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -55,13 +55,38 @@ impl WindowOpener {
 // Per-window state
 // ---------------------------------------------------------------------------
 
+/// Lightweight cursor/hover info extracted from the flat list after each redraw.
+struct HitItem {
+    x: f32, y: f32, w: f32, h: f32,
+    kind: HitKind,
+}
+
+enum HitKind {
+    Button(bool),
+    Text,
+}
+
+/// A scrollable region extracted from the flat list, used for momentum scrolling.
+struct ScrollItem {
+    x: f32, y: f32, w: f32, h: f32,
+    offset_x: Signal<f32>,
+    offset_y: Signal<f32>,
+    max_x: f32,
+    max_y: f32,
+}
+
 struct WindowState {
-    window:     Arc<Window>,
-    renderer:   Renderer,
-    build_view: Box<dyn Fn(&WindowOpener) -> (Theme, View)>,
-    theme:      Theme,
-    cursor_pos: (f32, f32), // logical pixels
-    frame:      u32,
+    window:        Arc<Window>,
+    renderer:      Renderer,
+    build_view:    Box<dyn Fn(&WindowOpener) -> (Theme, View)>,
+    theme:         Theme,
+    cursor_pos:    (f32, f32),
+    frame:         u32,
+    hit_items:     Vec<HitItem>,
+    scroll_items:  Vec<ScrollItem>,
+    scroll_vx:     f32,
+    scroll_vy:     f32,
+    last_scroll:   Option<Instant>,
 }
 
 impl WindowState {
@@ -151,6 +176,11 @@ impl App {
             theme: req.theme,
             cursor_pos: (0.0, 0.0),
             frame: 0,
+            hit_items: Vec::new(),
+            scroll_items: Vec::new(),
+            scroll_vx: 0.0,
+            scroll_vy: 0.0,
+            last_scroll: None,
         });
     }
 }
@@ -186,19 +216,59 @@ impl ApplicationHandler for App {
                 theme: req.theme,
                 cursor_pos: (0.0, 0.0),
                 frame: 0,
+                hit_items: Vec::new(),
+            scroll_items: Vec::new(),
+            scroll_vx: 0.0,
+            scroll_vy: 0.0,
+            last_scroll: None,
             });
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Advance tweens.
         let now = Instant::now();
-        let dt = self.last_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32());
+        let dt = self.last_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32())
+            .min(0.05); // cap dt so a stalled frame doesn't cause a huge jump
         self.last_tick = Some(now);
+
         if tick_tweens(dt) {
             for ws in self.windows.values() {
                 ws.window.request_redraw();
             }
+        }
+
+        // Apply mouse-wheel momentum (LineDelta only — trackpad uses native macOS momentum).
+        // Exponential decay with tau=350ms: decay = exp(-dt/0.35)
+        let mut any_scrolling = false;
+        for ws in self.windows.values_mut() {
+            let speed = ws.scroll_vx.abs().max(ws.scroll_vy.abs());
+            if speed > 1.0 {
+                any_scrolling = true;
+                let (cur_x, cur_y) = ws.cursor_pos;
+                let dx = ws.scroll_vx * dt;
+                let dy = ws.scroll_vy * dt;
+                apply_scroll(&ws.scroll_items, cur_x, cur_y, dx, dy);
+                let decay = (-dt / 0.35).exp();
+                ws.scroll_vx *= decay;
+                ws.scroll_vy *= decay;
+                ws.window.request_redraw();
+            } else {
+                ws.scroll_vx = 0.0;
+                ws.scroll_vy = 0.0;
+            }
+        }
+
+        // Stay in Poll mode while scrolling or for 100ms after the last scroll event.
+        // This ensures we render at display rate during trackpad momentum (which macOS
+        // delivers as continued PixelDelta events) rather than at event-delivery rate.
+        let recently_scrolled = self.windows.values().any(|ws| {
+            ws.last_scroll.map_or(false, |t| now.duration_since(t).as_millis() < 100)
+        });
+        if any_scrolling || recently_scrolled {
+            for ws in self.windows.values() { ws.window.request_redraw(); }
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        } else {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
         }
 
         let pending: Vec<WindowRequest> = self.queue.lock().unwrap().drain(..).collect();
@@ -236,68 +306,88 @@ impl ApplicationHandler for App {
                 let (px, py) = (position.x as f32 / scale, position.y as f32 / scale);
                 ws.cursor_pos = (px, py);
 
-                let view = ws.build(&opener);
-                let (w, h) = (ws.lw(), ws.lh());
-                let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
-                let mut changed = false;
+                // Fast path: check if cursor is near any interactive element.
+                // Only do a full rebuild (for on_hover callbacks) if needed.
                 let mut icon = CursorIcon::Default;
-                for fv in &flat {
-                    let l = fv.layout.location.x;
-                    let t = fv.layout.location.y;
-                    let hit = px >= l && px <= l + fv.layout.size.width
-                           && py >= t && py <= t + fv.layout.size.height;
-                    match &fv.kind {
-                        FlatViewKind::Button { on_hover: Some(on_hover), .. } => {
-                            on_hover(hit);
-                            changed = true;
+                let mut needs_rebuild = false;
+                for item in &ws.hit_items {
+                    let hit = px >= item.x && px <= item.x + item.w
+                           && py >= item.y && py <= item.y + item.h;
+                    match &item.kind {
+                        HitKind::Button(has_hover) => {
                             if hit { icon = CursorIcon::Pointer; }
+                            if *has_hover { needs_rebuild = true; }
                         }
-                        FlatViewKind::Button { .. } => {
-                            if hit { icon = CursorIcon::Pointer; }
-                        }
-                        FlatViewKind::TextInput { .. } => {
-                            if hit { icon = CursorIcon::Text; }
-                        }
-                        _ => {}
+                        HitKind::Text => { if hit { icon = CursorIcon::Text; } }
                     }
                 }
                 ws.window.set_cursor(Cursor::Icon(icon));
-                if changed { ws.window.request_redraw(); }
+
+                if needs_rebuild {
+                    let (w, h) = (ws.lw(), ws.lh());
+                    let view = ws.build(&opener);
+                    let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                    let mut changed = false;
+                    for fv in &flat {
+                        let l = fv.layout.location.x;
+                        let t = fv.layout.location.y;
+                        let hit = px >= l && px <= l + fv.layout.size.width
+                               && py >= t && py <= t + fv.layout.size.height;
+                        if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
+                            on_hover(hit);
+                            changed = true;
+                        }
+                    }
+                    if changed { ws.window.request_redraw(); }
+                }
                 return;
             }
 
             WindowEvent::CursorLeft { .. } => {
                 let Some(ws) = self.windows.get_mut(&id) else { return };
                 ws.window.set_cursor(Cursor::Icon(CursorIcon::Default));
-                let (w, h) = (ws.lw(), ws.lh());
-                let view = ws.build(&opener);
-                let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
-                let mut changed = false;
-                for fv in &flat {
-                    if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
-                        on_hover(false);
-                        changed = true;
+                let has_hover_btns = ws.hit_items.iter().any(|i| matches!(&i.kind, HitKind::Button(true)));
+                if has_hover_btns {
+                    let (w, h) = (ws.lw(), ws.lh());
+                    let view = ws.build(&opener);
+                    let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                    let mut changed = false;
+                    for fv in &flat {
+                        if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
+                            on_hover(false);
+                            changed = true;
+                        }
                     }
+                    if changed { ws.window.request_redraw(); }
                 }
-                if changed { ws.window.request_redraw(); }
                 return;
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
                 let Some(ws) = self.windows.get_mut(&id) else { return };
                 let scale = ws.scale();
-                let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32 / scale, pos.y as f32 / scale),
-                };
-                let (cx, cy) = ws.cursor_pos;
-                let (w, h) = (ws.lw(), ws.lh());
-                let view = ws.build(&opener);
-                let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
-                let view2 = ws.build(&opener);
-                let mut idx = 0;
-                dispatch_scroll(&view2, &ws.theme, &flat, cx, cy, dx, dy, &mut idx);
-                if needs_redraw() { clear_redraw(); ws.window.request_redraw(); }
+                let (cur_x, cur_y) = ws.cursor_pos;
+                match delta {
+                    // Trackpad: macOS delivers its own momentum phase as continued PixelDelta
+                    // events after the finger lifts. Apply directly — no extra momentum needed.
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        let dx = pos.x as f32 / scale;
+                        let dy = pos.y as f32 / scale;
+                        apply_scroll(&ws.scroll_items, cur_x, cur_y, dx, dy);
+                        ws.scroll_vx = 0.0;
+                        ws.scroll_vy = 0.0;
+                    }
+                    // Mouse wheel: discrete line steps — add our own momentum.
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        let dx = x * 40.0;
+                        let dy = y * 40.0;
+                        apply_scroll(&ws.scroll_items, cur_x, cur_y, dx, dy);
+                        ws.scroll_vx = ws.scroll_vx * 0.8 + dx * 6.0;
+                        ws.scroll_vy = ws.scroll_vy * 0.8 + dy * 6.0;
+                    }
+                }
+                ws.last_scroll = Some(Instant::now());
+                ws.window.request_redraw();
                 return;
             }
 
@@ -345,6 +435,26 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
+                        FlatViewKind::TextArea { focused, cursor, value, font_size, scroll_y, .. } => {
+                            if pressed {
+                                focused.set(hit);
+                                if hit {
+                                    ws.frame = 0;
+                                    let val = value.get();
+                                    let line_height = font_size * ws.scale() * 1.4;
+                                    let pad = 8.0 * ws.scale();
+                                    let rel_y = cy * ws.scale() - t - pad + scroll_y.get() * ws.scale();
+                                    let line_idx = (rel_y / line_height).floor().max(0.0) as usize;
+                                    let lines: Vec<&str> = val.split('\n').collect();
+                                    let line_idx = line_idx.min(lines.len().saturating_sub(1));
+                                    let mut byte_offset: usize = lines[..line_idx].iter().map(|l| l.len() + 1).sum();
+                                    let rel_x = (cx * ws.scale() - l - pad).max(0.0);
+                                    let line_cursor = ws.renderer.cursor_for_x(lines[line_idx], font_size * ws.scale(), rel_x);
+                                    byte_offset += line_cursor;
+                                    cursor.set(byte_offset.min(val.len()));
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -361,84 +471,181 @@ impl ApplicationHandler for App {
                 let view = ws.build(&opener);
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
 
-                // Collect text-input indices for Tab cycling.
+                // Collect text-input and text-area indices for Tab cycling.
                 let input_indices: Vec<usize> = flat.iter().enumerate()
-                    .filter(|(_, fv)| matches!(&fv.kind, FlatViewKind::TextInput { .. }))
+                    .filter(|(_, fv)| matches!(&fv.kind, FlatViewKind::TextInput { .. } | FlatViewKind::TextArea { .. }))
                     .map(|(i, _)| i)
                     .collect();
 
+                // Check if any TextInput is focused.
+                let mut handled = false;
                 for (pos, &idx) in input_indices.iter().enumerate() {
-                    let FlatViewKind::TextInput { value, focused, cursor, on_change, on_submit, .. } = &flat[idx].kind else { continue };
-                    if !focused.get() { continue; }
-                    let mut s = value.get();
-                    let mut cur = cursor.get().min(s.len());
-                    let mut changed = false;
-                    match &logical_key {
-                        Key::Named(NamedKey::Backspace) => {
-                            if cur > 0 {
-                                // find the char boundary before cur
-                                let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
-                                s.remove(prev);
-                                cur = prev;
-                                value.set(s.clone());
-                                cursor.set(cur);
-                                changed = true;
+                    match &flat[idx].kind {
+                        FlatViewKind::TextInput { value, focused, cursor, on_change, on_submit, .. } => {
+                            if !focused.get() { continue; }
+                            let mut s = value.get();
+                            let mut cur = cursor.get().min(s.len());
+                            let mut changed = false;
+                            match &logical_key {
+                                Key::Named(NamedKey::Backspace) => {
+                                    if cur > 0 {
+                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        s.remove(prev);
+                                        cur = prev;
+                                        value.set(s.clone());
+                                        cursor.set(cur);
+                                        changed = true;
+                                    }
+                                }
+                                Key::Named(NamedKey::Delete) => {
+                                    if cur < s.len() {
+                                        s.remove(cur);
+                                        value.set(s.clone());
+                                        changed = true;
+                                    }
+                                }
+                                Key::Named(NamedKey::ArrowLeft) => {
+                                    if cur > 0 {
+                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        cursor.set(prev);
+                                    }
+                                }
+                                Key::Named(NamedKey::ArrowRight) => {
+                                    if cur < s.len() {
+                                        let next = s[cur..].char_indices().nth(1).map(|(i, _)| cur + i).unwrap_or(s.len());
+                                        cursor.set(next);
+                                    }
+                                }
+                                Key::Named(NamedKey::Space) => {
+                                    s.insert(cur, ' ');
+                                    cur += 1;
+                                    value.set(s.clone());
+                                    cursor.set(cur);
+                                    changed = true;
+                                }
+                                Key::Named(NamedKey::Home) => { cursor.set(0); }
+                                Key::Named(NamedKey::End) => { cursor.set(s.len()); }
+                                Key::Named(NamedKey::Escape) => { focused.set(false); }
+                                Key::Named(NamedKey::Tab) => {
+                                    focused.set(false);
+                                    let next_idx = input_indices[(pos + 1) % input_indices.len()];
+                                    set_focused_at(&flat, next_idx, true);
+                                }
+                                Key::Named(NamedKey::Enter) => {
+                                    if let Some(f) = on_submit { f(value.get()); }
+                                    focused.set(false);
+                                }
+                                Key::Character(ch) => {
+                                    s.insert_str(cur, ch.as_str());
+                                    cur += ch.len();
+                                    value.set(s.clone());
+                                    cursor.set(cur);
+                                    changed = true;
+                                }
+                                _ => {}
                             }
-                        }
-                        Key::Named(NamedKey::Delete) => {
-                            if cur < s.len() {
-                                s.remove(cur);
-                                value.set(s.clone());
-                                changed = true;
+                            if changed {
+                                if let Some(f) = on_change { f(s); }
                             }
+                            handled = true;
+                            break;
                         }
-                        Key::Named(NamedKey::ArrowLeft) => {
-                            if cur > 0 {
-                                let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
-                                cursor.set(prev);
+                        FlatViewKind::TextArea { value, focused, cursor, scroll_y, on_change, font_size, .. } => {
+                            if !focused.get() { continue; }
+                            let mut s = value.get();
+                            let mut cur = cursor.get().min(s.len());
+                            let mut changed = false;
+                            match &logical_key {
+                                Key::Named(NamedKey::Backspace) => {
+                                    if cur > 0 {
+                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        s.remove(prev);
+                                        cur = prev;
+                                        value.set(s.clone());
+                                        cursor.set(cur);
+                                        changed = true;
+                                    }
+                                }
+                                Key::Named(NamedKey::Delete) => {
+                                    if cur < s.len() {
+                                        s.remove(cur);
+                                        value.set(s.clone());
+                                        changed = true;
+                                    }
+                                }
+                                Key::Named(NamedKey::ArrowLeft) => {
+                                    if cur > 0 {
+                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        cursor.set(prev);
+                                    }
+                                }
+                                Key::Named(NamedKey::ArrowRight) => {
+                                    if cur < s.len() {
+                                        let next = s[cur..].char_indices().nth(1).map(|(i, _)| cur + i).unwrap_or(s.len());
+                                        cursor.set(next);
+                                    }
+                                }
+                                Key::Named(NamedKey::ArrowUp) => {
+                                    let line_height = font_size * 1.4;
+                                    let (line_idx, col_off) = byte_to_line_col(&s, cur);
+                                    if line_idx > 0 {
+                                        cur = line_col_to_byte(&s, line_idx - 1, col_off);
+                                        cursor.set(cur);
+                                        let new_oy = (scroll_y.get() - line_height).max(0.0);
+                                        scroll_y.set(new_oy);
+                                    }
+                                }
+                                Key::Named(NamedKey::ArrowDown) => {
+                                    let line_height = font_size * 1.4;
+                                    let lines: Vec<&str> = s.split('\n').collect();
+                                    let (line_idx, col_off) = byte_to_line_col(&s, cur);
+                                    if line_idx + 1 < lines.len() {
+                                        cur = line_col_to_byte(&s, line_idx + 1, col_off);
+                                        cursor.set(cur);
+                                        scroll_y.set(scroll_y.get() + line_height);
+                                    }
+                                }
+                                Key::Named(NamedKey::Space) => {
+                                    s.insert(cur, ' ');
+                                    cur += 1;
+                                    value.set(s.clone());
+                                    cursor.set(cur);
+                                    changed = true;
+                                }
+                                Key::Named(NamedKey::Home) => { cursor.set(0); }
+                                Key::Named(NamedKey::End) => { cursor.set(s.len()); }
+                                Key::Named(NamedKey::Escape) => { focused.set(false); }
+                                Key::Named(NamedKey::Tab) => {
+                                    focused.set(false);
+                                    let next_idx = input_indices[(pos + 1) % input_indices.len()];
+                                    set_focused_at(&flat, next_idx, true);
+                                }
+                                Key::Named(NamedKey::Enter) => {
+                                    s.insert(cur, '\n');
+                                    cur += 1;
+                                    value.set(s.clone());
+                                    cursor.set(cur);
+                                    changed = true;
+                                }
+                                Key::Character(ch) => {
+                                    s.insert_str(cur, ch.as_str());
+                                    cur += ch.len();
+                                    value.set(s.clone());
+                                    cursor.set(cur);
+                                    changed = true;
+                                }
+                                _ => {}
                             }
-                        }
-                        Key::Named(NamedKey::ArrowRight) => {
-                            if cur < s.len() {
-                                let next = s[cur..].char_indices().nth(1).map(|(i, _)| cur + i).unwrap_or(s.len());
-                                cursor.set(next);
+                            if changed {
+                                if let Some(f) = on_change { f(s); }
                             }
-                        }
-                        Key::Named(NamedKey::Space) => {
-                            s.insert(cur, ' ');
-                            cur += 1;
-                            value.set(s.clone());
-                            cursor.set(cur);
-                            changed = true;
-                        }
-                        Key::Named(NamedKey::Home) => { cursor.set(0); }
-                        Key::Named(NamedKey::End) => { cursor.set(s.len()); }
-                        Key::Named(NamedKey::Escape) => { focused.set(false); }
-                        Key::Named(NamedKey::Tab) => {
-                            focused.set(false);
-                            let next = input_indices[(pos + 1) % input_indices.len()];
-                            if let FlatViewKind::TextInput { focused: nf, .. } = &flat[next].kind {
-                                nf.set(true);
-                            }
-                        }
-                        Key::Named(NamedKey::Enter) => {
-                            if let Some(f) = on_submit { f(value.get()); }
-                            focused.set(false);
-                        }
-                        Key::Character(ch) => {
-                            s.insert_str(cur, ch.as_str());
-                            cur += ch.len();
-                            value.set(s.clone());
-                            cursor.set(cur);
-                            changed = true;
+                            handled = true;
+                            break;
                         }
                         _ => {}
                     }
-                    if changed {
-                        if let Some(f) = on_change { f(s); }
-                    }
-                    break;
                 }
+                let _ = handled;
                 if needs_redraw() { clear_redraw(); }
                 ws.window.request_redraw();
                 return;
@@ -454,8 +661,32 @@ impl ApplicationHandler for App {
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
                 let any_focused = flat.iter().any(|fv| {
                     matches!(&fv.kind, FlatViewKind::TextInput { focused, .. } if focused.get())
+                    || matches!(&fv.kind, FlatViewKind::TextArea { focused, .. } if focused.get())
                 });
                 if any_focused { ws.window.request_redraw(); }
+                ws.hit_items = flat.iter().filter_map(|fv| {
+                    let (x, y, w, h) = (fv.layout.location.x, fv.layout.location.y, fv.layout.size.width, fv.layout.size.height);
+                    match &fv.kind {
+                        FlatViewKind::Button { on_hover, .. } =>
+                            Some(HitItem { x, y, w, h, kind: HitKind::Button(on_hover.is_some()) }),
+                        FlatViewKind::TextInput { .. } | FlatViewKind::TextArea { .. } =>
+                            Some(HitItem { x, y, w, h, kind: HitKind::Text }),
+                        _ => None,
+                    }
+                }).collect();
+                ws.scroll_items = flat.iter().filter_map(|fv| {
+                    let l = fv.layout;
+                    if let FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y } = &fv.kind {
+                        Some(ScrollItem {
+                            x: l.location.x, y: l.location.y,
+                            w: l.size.width,  h: l.size.height,
+                            offset_x: offset_x.clone(),
+                            offset_y: offset_y.clone(),
+                            max_x: *max_x,
+                            max_y: *max_y,
+                        })
+                    } else { None }
+                }).collect();
                 let flat = scale_flat(flat, scale);
                 ws.renderer.render(flat, cursor_visible, ws.theme.background);
                 return;
@@ -463,6 +694,36 @@ impl ApplicationHandler for App {
 
             _ => {}
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TextArea cursor helpers
+// ---------------------------------------------------------------------------
+
+fn byte_to_line_col(s: &str, byte: usize) -> (usize, usize) {
+    let before = &s[..byte.min(s.len())];
+    let line_idx = before.chars().filter(|&c| c == '\n').count();
+    let col = before.rfind('\n').map(|p| byte - p - 1).unwrap_or(byte);
+    (line_idx, col)
+}
+
+fn line_col_to_byte(s: &str, target_line: usize, col: usize) -> usize {
+    let mut offset = 0;
+    for (li, line) in s.split('\n').enumerate() {
+        if li == target_line {
+            return offset + col.min(line.len());
+        }
+        offset += line.len() + 1;
+    }
+    s.len()
+}
+
+fn set_focused_at(flat: &[FlatView], idx: usize, focused: bool) {
+    match &flat[idx].kind {
+        FlatViewKind::TextInput { focused: f, .. } => f.set(focused),
+        FlatViewKind::TextArea { focused: f, .. } => f.set(focused),
+        _ => {}
     }
 }
 
@@ -500,6 +761,11 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                 FlatViewKind::ClipStart { x: x * scale, y: y * scale, width: width * scale, height: height * scale },
             FlatViewKind::Image { path, corner_radius } =>
                 FlatViewKind::Image { path, corner_radius: corner_radius * scale },
+            FlatViewKind::TextArea { value, focused, cursor, scroll_y, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change } =>
+                FlatViewKind::TextArea { value, focused, cursor, scroll_y, placeholder, font_size: font_size * scale, bg_color, text_color, border_color, corner_radius: corner_radius * scale, on_change },
+            // ScrollRegion is logical-pixel metadata only; renderer ignores it.
+            FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y } =>
+                FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y },
             other => other,
         };
         FlatView { kind, layout }
@@ -507,9 +773,37 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
 }
 
 // ---------------------------------------------------------------------------
-// Scroll dispatch (unchanged logic, moved out of impl)
+// Nested scroll dispatch: innermost container wins, bubbles to outer if at limit.
 // ---------------------------------------------------------------------------
 
+fn apply_scroll(items: &[ScrollItem], cx: f32, cy: f32, dx: f32, dy: f32) {
+    // Iterate in reverse so the last-emitted (innermost/deepest) container is
+    // checked first. Stop as soon as a container absorbs the scroll delta.
+    for item in items.iter().rev() {
+        if cx >= item.x && cx <= item.x + item.w
+        && cy >= item.y && cy <= item.y + item.h {
+            let cur_x = item.offset_x.get();
+            let cur_y = item.offset_y.get();
+            let nx = (cur_x - dx).clamp(0.0, item.max_x);
+            let ny = (cur_y - dy).clamp(0.0, item.max_y);
+            // Only consume the event if this container can actually scroll in
+            // the requested direction — otherwise fall through to the outer one.
+            let consumed_x = dx.abs() > 0.1 && (nx != cur_x);
+            let consumed_y = dy.abs() > 0.1 && (ny != cur_y);
+            if consumed_x || consumed_y {
+                item.offset_x.set(nx);
+                item.offset_y.set(ny);
+                return;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scroll dispatch — only used by HotApp's MouseWheel handler.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "hot-reload")]
 fn dispatch_scroll(
     view: &View,
     theme: &Theme,
@@ -522,6 +816,7 @@ fn dispatch_scroll(
 ) {
     match view {
         View::Scroll { child, offset_x, offset_y, .. } => {
+            *flat_idx += 1; // skip ScrollRegion
             if let Some(fv) = flat.get(*flat_idx) {
                 if let FlatViewKind::ClipStart { x, y, width, height } = &fv.kind {
                     if cx >= *x && cx <= x + width && cy >= *y && cy <= y + height {
@@ -555,8 +850,31 @@ fn dispatch_scroll(
             dispatch_scroll(&rendered, theme, flat, cx, cy, dx, dy, flat_idx);
         }
         View::Button { .. } | View::Rect { .. } | View::Text { .. }
-        | View::TextInput { .. } | View::Image { .. } => {
+        | View::TextInput { .. } | View::Image { .. } | View::TextArea { .. } => {
             *flat_idx += 1;
+        }
+        View::VirtualList { item_count, row_height, offset_y, viewport_height, .. } => {
+            *flat_idx += 1; // skip ScrollRegion
+            if let Some(fv) = flat.get(*flat_idx) {
+                if let FlatViewKind::ClipStart { x, y, width, height } = &fv.kind {
+                    if cx >= *x && cx <= x + width && cy >= *y && cy <= y + height {
+                        let max_scroll = ((*item_count as f32) * row_height - viewport_height).max(0.0);
+                        offset_y.set((offset_y.get() - dy).clamp(0.0, max_scroll));
+                    }
+                }
+            }
+            // Skip forward past all flat entries belonging to this VirtualList
+            // (ClipStart + rows + ClipEnd). We track nesting depth to handle
+            // nested clips correctly.
+            *flat_idx += 1; // consume ClipStart
+            let mut depth = 1usize;
+            while *flat_idx < flat.len() && depth > 0 {
+                match &flat[*flat_idx].kind {
+                    FlatViewKind::ClipStart { .. } => { depth += 1; *flat_idx += 1; }
+                    FlatViewKind::ClipEnd => { depth -= 1; *flat_idx += 1; }
+                    _ => { *flat_idx += 1; }
+                }
+            }
         }
         View::Flexible { child, .. } => {
             dispatch_scroll(child, theme, flat, cx, cy, dx, dy, flat_idx);

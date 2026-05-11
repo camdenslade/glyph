@@ -256,6 +256,74 @@ impl Renderer {
                                 push_rect(&mut current.rect_verts, cursor_x, cursor_y, 2.0, cursor_h, text_color, 0.0);
                             }
                         }
+                        FlatViewKind::TextArea {
+                            value, focused, cursor, scroll_y, placeholder,
+                            font_size, bg_color, text_color, border_color, corner_radius, ..
+                        } => {
+                            let a = current_alpha(&opacity_stack);
+                            let bg_color   = Color { a: bg_color.a * a,   ..bg_color };
+                            let text_color = Color { a: text_color.a * a, ..text_color };
+                            let border_color = Color { a: border_color.a * a, ..border_color };
+                            let is_focused = focused.get();
+                            let val = value.get();
+                            let oy = scroll_y.get();
+                            let line_height = font_size * 1.4;
+
+                            push_rect(&mut current.rect_verts, l, t, fw, fh, bg_color, corner_radius);
+                            push_rect(&mut current.rect_verts, l - 1.0, t - 1.0, fw + 2.0, fh + 2.0,
+                                if is_focused { Color { a, ..Color::rgb(0.0, 0.47, 1.0) } } else { border_color },
+                                corner_radius + 1.0,
+                            );
+                            push_rect(&mut current.rect_verts, l, t, fw, fh, bg_color, corner_radius);
+
+                            let pad = 8.0;
+                            let text_x = l + pad;
+                            let base_y = t + pad - oy;
+
+                            let (display, display_color) = if val.is_empty() {
+                                (placeholder.as_str(), Color { a: 0.6 * a, ..Color::rgb(0.6, 0.6, 0.6) })
+                            } else {
+                                (val.as_str(), text_color)
+                            };
+
+                            let lines: Vec<&str> = display.split('\n').collect();
+                            for (li, line) in lines.iter().enumerate() {
+                                let ly = base_y + li as f32 * line_height;
+                                if ly + line_height < t || ly > t + fh { continue; }
+                                if !line.is_empty() {
+                                    let quads = self.text_renderer.shape(
+                                        &mut self.atlas, &self.ctx.queue, line, font_size,
+                                        display_color, FontWeight::Regular, TextAlign::Left,
+                                        text_x, ly, fw - pad * 2.0,
+                                    );
+                                    self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
+                                        &self.ctx.device, &self.atlas.view, &self.atlas.sampler,
+                                    );
+                                    for q in quads {
+                                        push_glyph(&mut current.text_verts, q.x, q.y, q.uv, q.color);
+                                    }
+                                }
+                            }
+
+                            if is_focused && current.cursor_visible && !val.is_empty() {
+                                let cur = cursor.get().min(val.len());
+                                let before = &val[..cur];
+                                let newlines_before = before.chars().filter(|&c| c == '\n').count();
+                                let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+                                let cur_line_text = &val[line_start..cur];
+                                let (prefix_w, _) = if cur_line_text.is_empty() {
+                                    (0.0_f32, 0.0_f32)
+                                } else {
+                                    self.text_renderer.measure(cur_line_text, font_size, fw)
+                                };
+                                let cursor_x = (text_x + prefix_w).min(l + fw - pad);
+                                let cursor_y = base_y + newlines_before as f32 * line_height;
+                                let cursor_h = font_size * 1.2;
+                                push_rect(&mut current.rect_verts, cursor_x, cursor_y, 2.0, cursor_h, text_color, 0.0);
+                            } else if is_focused && current.cursor_visible && val.is_empty() {
+                                push_rect(&mut current.rect_verts, text_x, base_y, 2.0, font_size * 1.2, text_color, 0.0);
+                            }
+                        }
                         FlatViewKind::ContainerRect { bg_color, border_color, border_width, corner_radius, shadow } => {
                             let a = current_alpha(&opacity_stack);
                             if let Some(sh) = shadow {
@@ -391,11 +459,15 @@ impl Renderer {
 /// Clamp a float scissor rect to physical pixel bounds, guarding against
 /// out-of-viewport regions that wgpu rejects.
 fn scissor_rect(x: f32, y: f32, w: f32, h: f32, sw: f32, sh: f32) -> [u32; 4] {
-    let x0 = x.max(0.0).min(sw) as u32;
-    let y0 = y.max(0.0).min(sh) as u32;
-    let x1 = (x + w).max(0.0).min(sw) as u32;
-    let y1 = (y + h).max(0.0).min(sh) as u32;
-    [x0, y0, (x1 - x0).max(1), (y1 - y0).max(1)]
+    let sw = sw as u32;
+    let sh = sh as u32;
+    let x0 = (x.max(0.0) as u32).min(sw);
+    let y0 = (y.max(0.0) as u32).min(sh);
+    let x1 = ((x + w).max(0.0) as u32).min(sw);
+    let y1 = ((y + h).max(0.0) as u32).min(sh);
+    let rw = (x1.saturating_sub(x0)).max(1).min(sw.saturating_sub(x0));
+    let rh = (y1.saturating_sub(y0)).max(1).min(sh.saturating_sub(y0));
+    [x0, y0, rw, rh]
 }
 
 fn push_rect(verts: &mut Vec<RectVertex>, x: f32, y: f32, w: f32, h: f32, color: Color, radius: f32) {

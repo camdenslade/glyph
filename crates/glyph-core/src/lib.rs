@@ -8,6 +8,7 @@
 pub mod anim;
 mod component;
 mod layout;
+mod router;
 mod signal;
 mod theme;
 mod view;
@@ -21,7 +22,8 @@ pub use layout::{FlatView, FlatViewKind, ViewTree};
 pub use signal::{Signal, clear_redraw, needs_redraw};
 pub use theme::Theme;
 pub use view::{
-    ButtonView, Color, ColumnView, FontWeight, ImageView, Lerp, RowView, ScrollView, Shadow,
-    TextAlign, TextInputView, TextView, View, ZStackView,
-    button, column, flex, flexible, image, list, opacity, rect, row, scroll, spacer, text, text_input, zstack,
+    ButtonView, Color, ColumnView, FontWeight, ImageView, Lerp, RectView, RowView, ScrollView, Shadow,
+    TextAlign, TextAreaView, TextInputView, TextView, View, VirtualListView, ZStackView,
+    button, column, flex, flexible, image, list, opacity, rect, row, scroll, spacer, text, text_area, text_input, virtual_list, zstack,
 };
+pub use router::Router;

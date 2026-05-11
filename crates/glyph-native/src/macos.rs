@@ -132,11 +132,12 @@ fn build_nsview(
         View::Button { label: text, on_click, font_size, .. } => {
             native_button(mtm, text, on_click.as_ref(), *font_size, targets)
         }
-        View::Rect { .. } | View::Image { .. } | View::TextInput { .. } | View::Spacer => {
+        View::Rect { .. } | View::Image { .. } | View::TextInput { .. }
+        | View::TextArea { .. } | View::VirtualList { .. } | View::Spacer => {
             let view = unsafe { NSView::initWithFrame(mtm.alloc::<NSView>(), NSRect::ZERO) };
             unsafe { Retained::cast(view) }
         }
-        View::Scroll { child, .. } | View::Flexible { child, .. } => build_nsview(mtm, child, targets),
+        View::Scroll { child, .. } | View::Flexible { child, .. } | View::Opacity { child, .. } => build_nsview(mtm, child, targets),
         View::ZStack { children, .. } => {
             stack_view(mtm, children, targets, NSUserInterfaceLayoutOrientation::Vertical)
         }

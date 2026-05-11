@@ -146,6 +146,8 @@ pub enum View {
         child: Box<View>,
         offset_x: Signal<f32>,
         offset_y: Signal<f32>,
+        /// Cached content size written by collect(); avoids a second taffy pass each frame.
+        max_scroll: Signal<(f32, f32)>,
         style: Style,
     },
     /// An embedded component. Renders by calling `component.render()` inline,
@@ -175,8 +177,35 @@ pub enum View {
         on_submit: Option<Box<dyn Fn(String)>>,
         style: Style,
     },
+    /// A virtualized list that only builds row views for the visible range.
+    VirtualList {
+        item_count: usize,
+        row_height: f32,
+        offset_y: Signal<f32>,
+        build_row: Box<dyn Fn(usize) -> View>,
+        viewport_height: f32,
+        style: Style,
+    },
     /// Invisible flexible spacer. Fills remaining space along the parent axis.
     Spacer,
+    /// A multi-line text input field. `value` holds the current string;
+    /// `focused` is true when this field has keyboard focus;
+    /// `cursor` is the byte offset of the insertion point within `value`;
+    /// `scroll_y` is the vertical scroll offset within the textarea.
+    TextArea {
+        value: Signal<String>,
+        focused: Signal<bool>,
+        cursor: Signal<usize>,
+        scroll_y: Signal<f32>,
+        placeholder: String,
+        font_size: f32,
+        bg_color: Color,
+        text_color: Color,
+        border_color: Color,
+        corner_radius: f32,
+        on_change: Option<Box<dyn Fn(String)>>,
+        style: Style,
+    },
     /// Multiplies the alpha of all descendant colors by `alpha`. Layout is
     /// pass-through — the child occupies exactly the same space as without this wrapper.
     Opacity {
@@ -520,6 +549,13 @@ impl ColumnView {
         self
     }
 
+    pub fn fill_width(mut self) -> Self {
+        if let View::Column { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
+        }
+        self
+    }
+
     pub fn clip(mut self) -> Self {
         if let View::Column { clip: ref mut c, .. } = self.view {
             *c = true;
@@ -685,6 +721,13 @@ impl RowView {
         self
     }
 
+    pub fn fill_width(mut self) -> Self {
+        if let View::Row { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
+        }
+        self
+    }
+
     pub fn clip(mut self) -> Self {
         if let View::Row { clip: ref mut c, .. } = self.view {
             *c = true;
@@ -779,13 +822,42 @@ pub fn list(items: Vec<View>, gap: f32, offset_y: Signal<f32>) -> ScrollView {
         shadow: None,
         clip: false,
     };
-    scroll(inner, Signal::new(0.0), offset_y)
+    scroll(inner, Signal::new(0.0), offset_y, Signal::new((0.0, 0.0)))
 }
 
-pub fn rect(color: Color) -> View {
-    View::Rect {
-        color,
-        style: Style::default(),
+pub struct RectView { view: View }
+
+impl RectView {
+    pub fn width(mut self, w: f32) -> Self {
+        if let View::Rect { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::Rect { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+    pub fn fill_width(mut self) -> Self {
+        if let View::Rect { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
+        }
+        self
+    }
+}
+
+impl From<RectView> for View {
+    fn from(r: RectView) -> Self { r.view }
+}
+
+pub fn rect(color: Color) -> RectView {
+    RectView {
+        view: View::Rect {
+            color,
+            style: Style::default(),
+        },
     }
 }
 
@@ -945,6 +1017,114 @@ pub fn text_input(value: Signal<String>, focused: Signal<bool>, cursor: Signal<u
     }
 }
 
+/// Builder returned by [`text_area`]. Call `.into()` to finish.
+pub struct TextAreaView {
+    view: View,
+}
+
+impl TextAreaView {
+    pub fn placeholder(mut self, s: impl Into<String>) -> Self {
+        if let View::TextArea { ref mut placeholder, .. } = self.view {
+            *placeholder = s.into();
+        }
+        self
+    }
+
+    pub fn font_size(mut self, size: f32) -> Self {
+        if let View::TextArea { ref mut font_size, .. } = self.view {
+            *font_size = size;
+        }
+        self
+    }
+
+    pub fn bg(mut self, color: Color) -> Self {
+        if let View::TextArea { ref mut bg_color, .. } = self.view {
+            *bg_color = color;
+        }
+        self
+    }
+
+    pub fn text_color(mut self, color: Color) -> Self {
+        if let View::TextArea { text_color: ref mut c, .. } = self.view {
+            *c = color;
+        }
+        self
+    }
+
+    pub fn border_color(mut self, color: Color) -> Self {
+        if let View::TextArea { border_color: ref mut c, .. } = self.view {
+            *c = color;
+        }
+        self
+    }
+
+    pub fn radius(mut self, r: f32) -> Self {
+        if let View::TextArea { ref mut corner_radius, .. } = self.view {
+            *corner_radius = r;
+        }
+        self
+    }
+
+    pub fn width(mut self, w: f32) -> Self {
+        if let View::TextArea { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::TextArea { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+
+    pub fn on_change(mut self, f: impl Fn(String) + 'static) -> Self {
+        if let View::TextArea { ref mut on_change, .. } = self.view {
+            *on_change = Some(Box::new(f));
+        }
+        self
+    }
+}
+
+impl From<TextAreaView> for View {
+    fn from(t: TextAreaView) -> Self {
+        t.view
+    }
+}
+
+/// A multi-line text input. `value`, `focused`, `cursor`, and `scroll_y` are shared signals
+/// that must be owned by the component to persist across frames.
+pub fn text_area(
+    value: Signal<String>,
+    focused: Signal<bool>,
+    cursor: Signal<usize>,
+    scroll_y: Signal<f32>,
+) -> TextAreaView {
+    TextAreaView {
+        view: View::TextArea {
+            value,
+            focused,
+            cursor,
+            scroll_y,
+            placeholder: String::new(),
+            font_size: 16.0,
+            bg_color: Color::WHITE,
+            text_color: Color::BLACK,
+            border_color: Color::rgb(0.7, 0.7, 0.7),
+            corner_radius: 6.0,
+            on_change: None,
+            style: Style {
+                size: taffy::Size {
+                    width: taffy::Dimension::Length(240.0),
+                    height: taffy::Dimension::Length(120.0),
+                },
+                ..Default::default()
+            },
+        },
+    }
+}
+
 /// An invisible spacer that fills remaining space along the parent's main axis.
 pub fn spacer() -> View {
     View::Spacer
@@ -967,6 +1147,34 @@ impl ScrollView {
                 width: taffy::Dimension::Length(width),
                 height: taffy::Dimension::Length(height),
             };
+        }
+        self
+    }
+
+    pub fn width(mut self, w: f32) -> Self {
+        if let View::Scroll { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::Scroll { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+
+    pub fn fill_width(mut self) -> Self {
+        if let View::Scroll { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
+        }
+        self
+    }
+
+    pub fn padding(mut self, p: f32) -> Self {
+        if let View::Scroll { ref mut style, .. } = self.view {
+            style.padding = taffy::Rect::length(p);
         }
         self
     }
@@ -1036,15 +1244,73 @@ pub fn zstack(children: Vec<View>) -> ZStackView {
     }
 }
 
+/// Builder returned by [`virtual_list`].
+pub struct VirtualListView {
+    view: View,
+}
+
+impl VirtualListView {
+    pub fn width(mut self, w: f32) -> Self {
+        if let View::VirtualList { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::VirtualList { ref mut style, ref mut viewport_height, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+            *viewport_height = h;
+        }
+        self
+    }
+}
+
+impl From<VirtualListView> for View {
+    fn from(v: VirtualListView) -> Self {
+        v.view
+    }
+}
+
+pub fn virtual_list(
+    item_count: usize,
+    row_height: f32,
+    offset_y: Signal<f32>,
+    viewport_height: f32,
+    build_row: impl Fn(usize) -> View + 'static,
+) -> VirtualListView {
+    VirtualListView {
+        view: View::VirtualList {
+            item_count,
+            row_height,
+            offset_y,
+            build_row: Box::new(build_row),
+            viewport_height,
+            style: Style {
+                size: taffy::Size {
+                    width: taffy::Dimension::Percent(1.0),
+                    height: taffy::Dimension::Length(viewport_height),
+                },
+                overflow: taffy::Point {
+                    x: taffy::Overflow::Hidden,
+                    y: taffy::Overflow::Hidden,
+                },
+                ..Default::default()
+            },
+        },
+    }
+}
+
 /// A scrollable viewport. `offset_x` and `offset_y` are reactive signals that
 /// the platform updates on mouse wheel events. Cloneable so the caller can
 /// pass copies to event handlers or child components.
-pub fn scroll(child: View, offset_x: Signal<f32>, offset_y: Signal<f32>) -> ScrollView {
+pub fn scroll(child: View, offset_x: Signal<f32>, offset_y: Signal<f32>, max_scroll: Signal<(f32, f32)>) -> ScrollView {
     ScrollView {
         view: View::Scroll {
             child: Box::new(child),
             offset_x,
             offset_y,
+            max_scroll,
             style: Style {
                 size: taffy::Size {
                     width: taffy::Dimension::Percent(1.0),

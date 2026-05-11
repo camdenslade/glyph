@@ -60,6 +60,15 @@ pub enum FlatViewKind {
         width: f32,
         height: f32,
     },
+    /// Scroll region metadata emitted just before a ClipStart for Scroll/VirtualList nodes.
+    /// Carries the offset signals and content bounds so the platform can apply momentum
+    /// without rebuilding the view tree.
+    ScrollRegion {
+        offset_x: Signal<f32>,
+        offset_y: Signal<f32>,
+        max_x: f32,
+        max_y: f32,
+    },
     /// End the most recent scissor clip region.
     ClipEnd,
     /// Begin multiplying all descendant colors by this alpha.
@@ -69,6 +78,19 @@ pub enum FlatViewKind {
     Image {
         path: String,
         corner_radius: f32,
+    },
+    TextArea {
+        value: Signal<String>,
+        focused: Signal<bool>,
+        cursor: Signal<usize>,
+        scroll_y: Signal<f32>,
+        placeholder: String,
+        font_size: f32,
+        bg_color: Color,
+        text_color: Color,
+        border_color: Color,
+        corner_radius: f32,
+        on_change: Option<Box<dyn Fn(String)>>,
     },
     /// A filled rectangle drawn before a container's children — used for
     /// container backgrounds, borders, and shadows.
@@ -120,7 +142,7 @@ impl ViewTree {
             )
             .expect("layout failed");
         let mut flat = Vec::new();
-        collect(&taffy, root_node, root, &mut flat, 0.0, 0.0);
+        collect(&mut taffy, root_node, root, &mut flat, 0.0, 0.0, measure);
         flat
     }
 }
@@ -141,10 +163,11 @@ fn expand(view: View, theme: &Theme) -> View {
             children: children.into_iter().map(|c| expand(c, theme)).collect(),
             style, bg_color, border_color, border_width, corner_radius, shadow,
         },
-        View::Scroll { child, offset_x, offset_y, style } => View::Scroll {
+        View::Scroll { child, offset_x, offset_y, max_scroll, style } => View::Scroll {
             child: Box::new(expand(*child, theme)),
             offset_x,
             offset_y,
+            max_scroll,
             style,
         },
         View::Flexible { child, grow, shrink } => View::Flexible {
@@ -156,6 +179,8 @@ fn expand(view: View, theme: &Theme) -> View {
             child: Box::new(expand(*child, theme)),
             alpha,
         },
+        View::VirtualList { .. } => view,
+        View::TextArea { .. } => view,
         other => other,
     }
 }
@@ -164,7 +189,8 @@ fn get_style(view: &View) -> taffy::Style {
     match view {
         View::Column { style, .. } | View::Row { style, .. } | View::ZStack { style, .. }
         | View::Scroll { style, .. } | View::Rect { style, .. } | View::Text { style, .. }
-        | View::Button { style, .. } | View::TextInput { style, .. } | View::Image { style, .. } => style.clone(),
+        | View::Button { style, .. } | View::TextInput { style, .. } | View::Image { style, .. }
+        | View::VirtualList { style, .. } | View::TextArea { style, .. } => style.clone(),
         View::Flexible { child, grow, shrink } => {
             let mut s = get_style(child);
             s.flex_grow = *grow;
@@ -269,17 +295,56 @@ fn build_node(
             node
         }
         View::Opacity { child, .. } => build_node(taffy, child, measure),
+        View::TextArea { style, .. } => taffy.new_leaf_with_context(style.clone(), None).expect("taffy node"),
+        View::VirtualList { item_count, row_height, offset_y, build_row, viewport_height, style } => {
+            let inner = build_virtual_inner(taffy, measure, *item_count, *row_height, offset_y, build_row, *viewport_height);
+            let mut node_style = style.clone();
+            node_style.size.height = taffy::Dimension::Length(*viewport_height);
+            taffy.new_with_children(node_style, &[inner]).expect("taffy node")
+        }
         View::Component(_) => unreachable!(),
     }
 }
 
+fn build_virtual_inner(
+    taffy: &mut TaffyTree<Option<(String, f32)>>,
+    measure: &mut dyn FnMut(&str, f32, f32) -> (f32, f32),
+    item_count: usize,
+    row_height: f32,
+    offset_y: &Signal<f32>,
+    build_row: &Box<dyn Fn(usize) -> View>,
+    viewport_height: f32,
+) -> NodeId {
+    let oy = offset_y.get();
+    let first_row = (oy / row_height).floor() as usize;
+    let visible_count = (viewport_height / row_height).ceil() as usize + 1;
+    let last_row = (first_row + visible_count).min(item_count);
+    let col_style = taffy::Style {
+        flex_direction: taffy::FlexDirection::Column,
+        align_items: Some(taffy::AlignItems::Stretch),
+        size: taffy::Size {
+            width: taffy::Dimension::Percent(1.0),
+            height: taffy::Dimension::Auto,
+        },
+        ..Default::default()
+    };
+    let child_nodes: Vec<NodeId> = (first_row..last_row)
+        .map(|i| {
+            let row_view = build_row(i);
+            build_node(taffy, &row_view, measure)
+        })
+        .collect();
+    taffy.new_with_children(col_style, &child_nodes).expect("taffy node")
+}
+
 fn collect(
-    taffy: &TaffyTree<Option<(String, f32)>>,
+    taffy: &mut TaffyTree<Option<(String, f32)>>,
     node: NodeId,
     view: View,
     flat: &mut Vec<FlatView>,
     parent_x: f32,
     parent_y: f32,
+    measure: &mut dyn FnMut(&str, f32, f32) -> (f32, f32),
 ) {
     let layout = *taffy.layout(node).expect("layout");
     let x = parent_x + layout.location.x;
@@ -327,7 +392,7 @@ fn collect(
             }
             let child_nodes = taffy.children(node).expect("children");
             for (child_node, child_view) in child_nodes.iter().zip(children.into_iter()) {
-                collect(taffy, *child_node, child_view, flat, x, y);
+                collect(taffy, *child_node, child_view, flat, x, y, measure);
             }
             if clip {
                 flat.push(FlatView { kind: FlatViewKind::ClipEnd, layout: adjusted });
@@ -342,20 +407,64 @@ fn collect(
             }
             let child_nodes = taffy.children(node).expect("children");
             for (child_node, child_view) in child_nodes.iter().zip(children.into_iter()) {
-                collect(taffy, *child_node, child_view, flat, x, y);
+                collect(taffy, *child_node, child_view, flat, x, y, measure);
             }
         }
-        View::Scroll { child, offset_x, offset_y, .. } => {
+        View::Scroll { child, offset_x, offset_y, max_scroll, .. } => {
             let vw = adjusted.size.width;
             let vh = adjusted.size.height;
+            let child_nodes = taffy.children(node).expect("children");
+            // TODO: scroll is still a little laggy. The root cause is that scroll offset
+            // is baked into flat list positions in collect(), so every scroll pixel requires
+            // a full build+layout pass. The fix is to move scroll translation into the
+            // renderer (pass offset to render, keep flat positions viewport-relative) so
+            // scroll frames skip layout entirely. The max_scroll cache below is a partial
+            // mitigation (avoids the second taffy pass after the first frame) but the main
+            // layout pass still runs every frame.
+            let (max_x, max_y) = {
+                let cached = max_scroll.get();
+                if cached.0 > 0.0 || cached.1 > 0.0 {
+                    cached
+                } else {
+                    taffy.compute_layout_with_measure(
+                        child_nodes[0],
+                        Size { width: taffy::AvailableSpace::Definite(vw), height: taffy::AvailableSpace::MaxContent },
+                        |known_size, available, _node, ctx, _style| {
+                            if let Some(Some((content, font_size))) = ctx {
+                                let max_w = known_size.width.unwrap_or_else(|| match available.width {
+                                    taffy::AvailableSpace::Definite(w) => w,
+                                    _ => 4096.0,
+                                });
+                                let (w, h) = measure(content, *font_size, max_w);
+                                Size { width: known_size.width.unwrap_or(w), height: known_size.height.unwrap_or(h) }
+                            } else {
+                                Size { width: known_size.width.unwrap_or(0.0), height: known_size.height.unwrap_or(0.0) }
+                            }
+                        },
+                    ).ok();
+                    let nl = taffy.layout(child_nodes[0]).expect("child layout");
+                    let mx = (nl.size.width - vw).max(0.0);
+                    let my = (nl.size.height - vh).max(0.0);
+                    max_scroll.set((mx, my));
+                    (mx, my)
+                }
+            };
+            flat.push(FlatView {
+                kind: FlatViewKind::ScrollRegion {
+                    offset_x: offset_x.clone(),
+                    offset_y: offset_y.clone(),
+                    max_x,
+                    max_y,
+                },
+                layout: adjusted,
+            });
             flat.push(FlatView {
                 kind: FlatViewKind::ClipStart { x, y, width: vw, height: vh },
                 layout: adjusted,
             });
             let ox = offset_x.get();
             let oy = offset_y.get();
-            let child_nodes = taffy.children(node).expect("children");
-            collect(taffy, child_nodes[0], *child, flat, x - ox, y - oy);
+            collect(taffy, child_nodes[0], *child, flat, x - ox, y - oy, measure);
             flat.push(FlatView { kind: FlatViewKind::ClipEnd, layout: adjusted });
         }
         View::Image { path, corner_radius, .. } => {
@@ -365,12 +474,51 @@ fn collect(
             });
         }
         View::Flexible { child, .. } => {
-            collect(taffy, node, *child, flat, parent_x, parent_y);
+            collect(taffy, node, *child, flat, parent_x, parent_y, measure);
         }
         View::Opacity { child, alpha } => {
             flat.push(FlatView { kind: FlatViewKind::OpacityStart { alpha }, layout: adjusted });
-            collect(taffy, node, *child, flat, parent_x, parent_y);
+            collect(taffy, node, *child, flat, parent_x, parent_y, measure);
             flat.push(FlatView { kind: FlatViewKind::OpacityEnd, layout: adjusted });
+        }
+        View::TextArea { value, focused, cursor, scroll_y, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change, .. } => {
+            flat.push(FlatView {
+                kind: FlatViewKind::TextArea { value, focused, cursor, scroll_y, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change },
+                layout: adjusted,
+            });
+        }
+        View::VirtualList { item_count, row_height, offset_y, build_row, viewport_height, .. } => {
+            let vw = adjusted.size.width;
+            let vh = adjusted.size.height;
+            let max_y = (item_count as f32 * row_height - viewport_height).max(0.0);
+            flat.push(FlatView {
+                kind: FlatViewKind::ScrollRegion {
+                    offset_x: Signal::new(0.0),
+                    offset_y: offset_y.clone(),
+                    max_x: 0.0,
+                    max_y,
+                },
+                layout: adjusted,
+            });
+            flat.push(FlatView {
+                kind: FlatViewKind::ClipStart { x, y, width: vw, height: vh },
+                layout: adjusted,
+            });
+            let oy = offset_y.get();
+            let frac_offset = oy % row_height;
+            let first_row = (oy / row_height).floor() as usize;
+            let visible_count = (viewport_height / row_height).ceil() as usize + 1;
+            let last_row = (first_row + visible_count).min(item_count);
+            let child_nodes = taffy.children(node).expect("children");
+            let col_node = child_nodes[0];
+            let col_children = taffy.children(col_node).expect("col children");
+            for (ci, &child_node) in col_children.iter().enumerate() {
+                let row_idx = first_row + ci;
+                if row_idx >= last_row { break; }
+                let row_view = build_row(row_idx);
+                collect(taffy, child_node, row_view, flat, x, y - frac_offset, measure);
+            }
+            flat.push(FlatView { kind: FlatViewKind::ClipEnd, layout: adjusted });
         }
         View::Component(_) => unreachable!(),
     }
