@@ -32,8 +32,8 @@ pub enum SignalSlot {
 /// a stable integer ID that maps to a raw pointer (`*mut SignalSlot`) passed to
 /// the guest as an opaque handle. The pointer remains valid for the lifetime of
 /// the `SignalRegistry`.
+#[allow(clippy::vec_box)] // Box ensures stable addresses; raw pointers into slots are handed to guests
 pub struct SignalRegistry {
-    /// Heap-allocated slots; kept alive behind Box so their addresses are stable.
     slots: Vec<Box<SignalSlot>>,
 }
 

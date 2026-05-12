@@ -757,7 +757,7 @@ fn collect(
                 });
             }
             let child_nodes = taffy.children(node).expect("children");
-            for (child_node, child_view) in child_nodes.iter().zip(children.into_iter()) {
+            for (child_node, child_view) in child_nodes.iter().zip(children) {
                 collect(taffy, *child_node, child_view, flat, x, y, measure);
             }
             if clip {
@@ -789,7 +789,7 @@ fn collect(
                 });
             }
             let child_nodes = taffy.children(node).expect("children");
-            for (child_node, child_view) in child_nodes.iter().zip(children.into_iter()) {
+            for (child_node, child_view) in child_nodes.iter().zip(children) {
                 collect(taffy, *child_node, child_view, flat, x, y, measure);
             }
         }
