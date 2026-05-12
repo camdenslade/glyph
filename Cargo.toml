@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    "crates/glyph-core",
-    "crates/glyph-render",
-    "crates/glyph-text",
-    "crates/glyph-platform",
-    "crates/glyph-native",
-    "crates/glyph-demo",
-    "crates/glyph-github",
-    "crates/glyph-widgets",
-    "crates/glyph-hot",
-    "crates/glyph-ui",
+    "crates/core-glyph",
+    "crates/render-glyph",
+    "crates/text-glyph",
+    "crates/platform-glyph",
+    "crates/native-glyph",
+    "crates/demo-glyph",
+    "crates/github-glyph",
+    "crates/widgets-glyph",
+    "crates/hot-glyph",
+    "crates/ui-glyph",
 ]
 resolver = "2"

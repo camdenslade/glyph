@@ -1,0 +1,10 @@
+[package]
+name = "core-glyph"
+version = "0.1.0"
+edition = "2021"
+description = "View tree, Signal<T>, flexbox layout, and flat quad output for the Glyph UI framework"
+repository = "https://github.com/camslade/glyph"
+license = "MIT"
+
+[dependencies]
+taffy = "0.5"

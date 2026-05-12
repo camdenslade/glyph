@@ -38,7 +38,7 @@ App::run(
 ```sh
 git clone https://github.com/camslade/glyph
 cd glyph
-cargo run -p glyph-demo
+cargo run -p demo-glyph
 ```
 
 ## Example
@@ -46,8 +46,8 @@ cargo run -p glyph-demo
 A reactive counter with a button:
 
 ```rust
-use glyph_core::{Signal, Theme, button, column, row, text};
-use glyph_platform::App;
+use core_glyph::{Signal, Theme, button, column, row, text};
+use platform_glyph::App;
 
 fn main() {
     let count = Signal::new(0i32);
@@ -145,16 +145,16 @@ Layout is computed by [Taffy](https://github.com/DioxusLabs/taffy) (flexbox) eac
 
 | Crate | Role |
 |---|---|
-| `glyph-core` | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
-| `glyph-text` | cosmic-text shaping, glyph atlas, text measurement |
-| `glyph-render` | wgpu pipelines, rect / text / image renderer |
-| `glyph-platform` | winit event loop, hit-test, click / hover / scroll / keyboard |
-| `glyph-native` | macOS AppKit bridge (objc2) |
-| `glyph-widgets` | pre-built widgets: `Checkbox`, `Toggle`, `Slider`, `RadioGroup`, `Select` |
-| `glyph-ui` | design system: Tailwind-style color palette, spacing tokens, typography helpers, layout primitives, and a full component library (`card`, `badge`, `avatar`, `alert`, `tab_bar`, …) |
-| `glyph-hot` | hot-reload dylib loader |
-| `glyph-demo` | interactive demo app |
-| `glyph-github` | GitHub dashboard example app |
+| `core-glyph` | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
+| `text-glyph` | cosmic-text shaping, glyph atlas, text measurement |
+| `render-glyph` | wgpu pipelines, rect / text / image renderer |
+| `platform-glyph` | winit event loop, hit-test, click / hover / scroll / keyboard |
+| `native-glyph` | macOS AppKit bridge (objc2) |
+| `widgets-glyph` | pre-built widgets: `Checkbox`, `Toggle`, `Slider`, `RadioGroup`, `Select` |
+| `ui-glyph` | design system: Tailwind-style color palette, spacing tokens, typography helpers, layout primitives, and a full component library (`card`, `badge`, `avatar`, `alert`, `tab_bar`, …) |
+| `hot-glyph` | hot-reload dylib loader |
+| `demo-glyph` | interactive demo app |
+| `github-glyph` | GitHub dashboard example app |
 
 ## Status
 

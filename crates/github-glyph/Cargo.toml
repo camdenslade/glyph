@@ -1,0 +1,18 @@
+[package]
+name = "github-glyph"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "github-glyph"
+path = "src/main.rs"
+
+[dependencies]
+core-glyph = { path = "../core-glyph" }
+platform-glyph = { path = "../platform-glyph" }
+ui-glyph = { path = "../ui-glyph" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+open = "5"
+dirs = "5"
