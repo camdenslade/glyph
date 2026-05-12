@@ -521,34 +521,32 @@ impl ApplicationHandler for App {
                             value,
                             font_size,
                             ..
-                        } => {
-                            if pressed {
-                                focused.set(hit);
-                                ws.window.set_ime_allowed(hit);
-                                if hit {
-                                    hit_text_input = true;
-                                    ws.frame = 0;
-                                    let val = value.get();
-                                    let pad = 8.0;
-                                    let click_offset = (cx - l - pad).max(0.0);
-                                    let byte_idx = ws.renderer.cursor_for_x(
-                                        &val,
-                                        *font_size,
-                                        click_offset,
-                                    );
-                                    cursor.set(byte_idx);
-                                    ws.text_edit.focused_flat_index = Some(idx);
-                                    ws.text_edit.composing = None;
-                                    if ws.modifiers.shift_key() {
-                                        let anchor =
-                                            ws.text_edit.selection_anchor.unwrap_or(cursor.get());
-                                        ws.text_edit.selection_anchor = Some(anchor);
-                                        ws.text_edit.selection =
-                                            normalized_selection(anchor, byte_idx);
-                                    } else {
-                                        ws.text_edit.selection_anchor = None;
-                                        ws.text_edit.selection = None;
-                                    }
+                        } if pressed => {
+                            focused.set(hit);
+                            ws.window.set_ime_allowed(hit);
+                            if hit {
+                                hit_text_input = true;
+                                ws.frame = 0;
+                                let val = value.get();
+                                let pad = 8.0;
+                                let click_offset = (cx - l - pad).max(0.0);
+                                let byte_idx = ws.renderer.cursor_for_x(
+                                    &val,
+                                    *font_size,
+                                    click_offset,
+                                );
+                                cursor.set(byte_idx);
+                                ws.text_edit.focused_flat_index = Some(idx);
+                                ws.text_edit.composing = None;
+                                if ws.modifiers.shift_key() {
+                                    let anchor =
+                                        ws.text_edit.selection_anchor.unwrap_or(cursor.get());
+                                    ws.text_edit.selection_anchor = Some(anchor);
+                                    ws.text_edit.selection =
+                                        normalized_selection(anchor, byte_idx);
+                                } else {
+                                    ws.text_edit.selection_anchor = None;
+                                    ws.text_edit.selection = None;
                                 }
                             }
                         }
@@ -559,30 +557,28 @@ impl ApplicationHandler for App {
                             font_size,
                             scroll_y,
                             ..
-                        } => {
-                            if pressed {
-                                focused.set(hit);
-                                if hit {
-                                    ws.frame = 0;
-                                    let val = value.get();
-                                    let line_height = font_size * ws.scale() * 1.4;
-                                    let pad = 8.0 * ws.scale();
-                                    let rel_y =
-                                        cy * ws.scale() - t - pad + scroll_y.get() * ws.scale();
-                                    let line_idx = (rel_y / line_height).floor().max(0.0) as usize;
-                                    let lines: Vec<&str> = val.split('\n').collect();
-                                    let line_idx = line_idx.min(lines.len().saturating_sub(1));
-                                    let mut byte_offset: usize =
-                                        lines[..line_idx].iter().map(|l| l.len() + 1).sum();
-                                    let rel_x = (cx * ws.scale() - l - pad).max(0.0);
-                                    let line_cursor = ws.renderer.cursor_for_x(
-                                        lines[line_idx],
-                                        font_size * ws.scale(),
-                                        rel_x,
-                                    );
-                                    byte_offset += line_cursor;
-                                    cursor.set(byte_offset.min(val.len()));
-                                }
+                        } if pressed => {
+                            focused.set(hit);
+                            if hit {
+                                ws.frame = 0;
+                                let val = value.get();
+                                let line_height = font_size * ws.scale() * 1.4;
+                                let pad = 8.0 * ws.scale();
+                                let rel_y =
+                                    cy * ws.scale() - t - pad + scroll_y.get() * ws.scale();
+                                let line_idx = (rel_y / line_height).floor().max(0.0) as usize;
+                                let lines: Vec<&str> = val.split('\n').collect();
+                                let line_idx = line_idx.min(lines.len().saturating_sub(1));
+                                let mut byte_offset: usize =
+                                    lines[..line_idx].iter().map(|l| l.len() + 1).sum();
+                                let rel_x = (cx * ws.scale() - l - pad).max(0.0);
+                                let line_cursor = ws.renderer.cursor_for_x(
+                                    lines[line_idx],
+                                    font_size * ws.scale(),
+                                    rel_x,
+                                );
+                                byte_offset += line_cursor;
+                                cursor.set(byte_offset.min(val.len()));
                             }
                         }
                         _ => {}
@@ -758,37 +754,33 @@ impl ApplicationHandler for App {
                                         changed = true;
                                     }
                                 }
-                                Key::Named(NamedKey::ArrowLeft) => {
-                                    if cur > 0 {
-                                        let prev = s[..cur]
-                                            .char_indices()
-                                            .next_back()
-                                            .map(|(i, _)| i)
-                                            .unwrap_or(0);
-                                        cursor.set(prev);
-                                        update_selection_for_move(
-                                            &mut ws.text_edit,
-                                            cur,
-                                            prev,
-                                            ws.modifiers.shift_key(),
-                                        );
-                                    }
+                                Key::Named(NamedKey::ArrowLeft) if cur > 0 => {
+                                    let prev = s[..cur]
+                                        .char_indices()
+                                        .next_back()
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
+                                    cursor.set(prev);
+                                    update_selection_for_move(
+                                        &mut ws.text_edit,
+                                        cur,
+                                        prev,
+                                        ws.modifiers.shift_key(),
+                                    );
                                 }
-                                Key::Named(NamedKey::ArrowRight) => {
-                                    if cur < s.len() {
-                                        let next = s[cur..]
-                                            .char_indices()
-                                            .nth(1)
-                                            .map(|(i, _)| cur + i)
-                                            .unwrap_or(s.len());
-                                        cursor.set(next);
-                                        update_selection_for_move(
-                                            &mut ws.text_edit,
-                                            cur,
-                                            next,
-                                            ws.modifiers.shift_key(),
-                                        );
-                                    }
+                                Key::Named(NamedKey::ArrowRight) if cur < s.len() => {
+                                    let next = s[cur..]
+                                        .char_indices()
+                                        .nth(1)
+                                        .map(|(i, _)| cur + i)
+                                        .unwrap_or(s.len());
+                                    cursor.set(next);
+                                    update_selection_for_move(
+                                        &mut ws.text_edit,
+                                        cur,
+                                        next,
+                                        ws.modifiers.shift_key(),
+                                    );
                                 }
                                 Key::Named(NamedKey::Space) => {
                                     delete_selection(&mut s, &mut cur, ws.text_edit.selection);
@@ -878,46 +870,38 @@ impl ApplicationHandler for App {
                             let mut cur = cursor.get().min(s.len());
                             let mut changed = false;
                             match &logical_key {
-                                Key::Named(NamedKey::Backspace) => {
-                                    if cur > 0 {
-                                        let prev = s[..cur]
-                                            .char_indices()
-                                            .next_back()
-                                            .map(|(i, _)| i)
-                                            .unwrap_or(0);
-                                        s.remove(prev);
-                                        cur = prev;
-                                        value.set(s.clone());
-                                        cursor.set(cur);
-                                        changed = true;
-                                    }
+                                Key::Named(NamedKey::Backspace) if cur > 0 => {
+                                    let prev = s[..cur]
+                                        .char_indices()
+                                        .next_back()
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
+                                    s.remove(prev);
+                                    cur = prev;
+                                    value.set(s.clone());
+                                    cursor.set(cur);
+                                    changed = true;
                                 }
-                                Key::Named(NamedKey::Delete) => {
-                                    if cur < s.len() {
-                                        s.remove(cur);
-                                        value.set(s.clone());
-                                        changed = true;
-                                    }
+                                Key::Named(NamedKey::Delete) if cur < s.len() => {
+                                    s.remove(cur);
+                                    value.set(s.clone());
+                                    changed = true;
                                 }
-                                Key::Named(NamedKey::ArrowLeft) => {
-                                    if cur > 0 {
-                                        let prev = s[..cur]
-                                            .char_indices()
-                                            .next_back()
-                                            .map(|(i, _)| i)
-                                            .unwrap_or(0);
-                                        cursor.set(prev);
-                                    }
+                                Key::Named(NamedKey::ArrowLeft) if cur > 0 => {
+                                    let prev = s[..cur]
+                                        .char_indices()
+                                        .next_back()
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
+                                    cursor.set(prev);
                                 }
-                                Key::Named(NamedKey::ArrowRight) => {
-                                    if cur < s.len() {
-                                        let next = s[cur..]
-                                            .char_indices()
-                                            .nth(1)
-                                            .map(|(i, _)| cur + i)
-                                            .unwrap_or(s.len());
-                                        cursor.set(next);
-                                    }
+                                Key::Named(NamedKey::ArrowRight) if cur < s.len() => {
+                                    let next = s[cur..]
+                                        .char_indices()
+                                        .nth(1)
+                                        .map(|(i, _)| cur + i)
+                                        .unwrap_or(s.len());
+                                    cursor.set(next);
                                 }
                                 Key::Named(NamedKey::ArrowUp) => {
                                     let line_height = font_size * 1.4;
