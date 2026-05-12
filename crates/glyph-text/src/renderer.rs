@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments, clippy::new_without_default)]
 use crate::atlas::{GlyphAtlas, GlyphUv};
 use glyph_core::{Color, FontWeight, TextAlign};
 use cosmic_text::{Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Style, SwashCache, Weight};

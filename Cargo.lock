@@ -786,6 +786,7 @@ dependencies = [
  "dirs",
  "glyph-core",
  "glyph-platform",
+ "glyph-ui",
  "open",
  "reqwest",
  "serde",
@@ -844,6 +845,13 @@ dependencies = [
  "cosmic-text",
  "glyph-core",
  "wgpu",
+]
+
+[[package]]
+name = "glyph-ui"
+version = "0.1.0"
+dependencies = [
+ "glyph-core",
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 use crate::component::Component;
 use crate::signal::Signal;
 use crate::theme::Theme;

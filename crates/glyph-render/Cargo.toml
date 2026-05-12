@@ -2,10 +2,13 @@
 name = "glyph-render"
 version = "0.1.0"
 edition = "2021"
+description = "wgpu GPU renderer for the Glyph UI framework"
+repository = "https://github.com/camslade/glyph"
+license = "MIT"
 
 [dependencies]
-glyph-core = { path = "../glyph-core" }
-glyph-text = { path = "../glyph-text" }
+glyph-core = { version = "0.1.0", path = "../glyph-core" }
+glyph-text = { version = "0.1.0", path = "../glyph-text" }
 wgpu    = "22"
 winit   = "0.30"
 bytemuck = { version = "1", features = ["derive"] }

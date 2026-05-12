@@ -198,7 +198,7 @@ fn native_button(
 ) -> Retained<NSView> {
     let cb: Box<dyn Fn()> = unsafe {
         std::mem::transmute::<Box<dyn Fn() + '_>, Box<dyn Fn() + 'static>>(
-            Box::new(|| on_click()),
+            Box::new(on_click),
         )
     };
     let target = ActionTarget::new(mtm, cb);

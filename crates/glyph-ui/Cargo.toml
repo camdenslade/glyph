@@ -1,8 +1,8 @@
 [package]
-name = "glyph-widgets"
+name = "glyph-ui"
 version = "0.1.0"
 edition = "2021"
-description = "Pre-built interactive widgets for the Glyph UI framework"
+description = "Design system: color palette, spacing tokens, typography, and component library for Glyph"
 repository = "https://github.com/camslade/glyph"
 license = "MIT"
 

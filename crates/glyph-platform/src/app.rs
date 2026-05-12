@@ -1,4 +1,6 @@
-use glyph_core::{FlatView, FlatViewKind, Signal, Theme, View, ViewTree, clear_redraw, needs_redraw, tick_tweens};
+use glyph_core::{
+    clear_redraw, needs_redraw, tick_tweens, FlatView, FlatViewKind, Signal, Theme, View, ViewTree,
+};
 use glyph_render::{GpuContext, Renderer};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -7,7 +9,7 @@ use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{Key, NamedKey},
+    keyboard::{Key, ModifiersState, NamedKey},
     window::{Cursor, CursorIcon, Window, WindowId},
 };
 
@@ -15,12 +17,14 @@ use winit::{
 // WindowOpener — cheaply cloneable handle for opening new windows from closures
 // ---------------------------------------------------------------------------
 
+type BuildViewFn = Box<dyn Fn(&WindowOpener) -> (Theme, View) + Send>;
+
 pub struct WindowRequest {
-    pub build_view: Box<dyn Fn(&WindowOpener) -> (Theme, View) + Send>,
-    pub title:      String,
-    pub width:      f64,
-    pub height:     f64,
-    pub theme:      Theme,
+    pub build_view: BuildViewFn,
+    pub title: String,
+    pub width: f64,
+    pub height: f64,
+    pub theme: Theme,
 }
 
 /// Clone this into button callbacks to open new windows.
@@ -57,7 +61,10 @@ impl WindowOpener {
 
 /// Lightweight cursor/hover info extracted from the flat list after each redraw.
 struct HitItem {
-    x: f32, y: f32, w: f32, h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
     kind: HitKind,
 }
 
@@ -66,9 +73,20 @@ enum HitKind {
     Text,
 }
 
+#[derive(Default)]
+struct TextEditState {
+    focused_flat_index: Option<usize>,
+    selection_anchor: Option<usize>,
+    selection: Option<(usize, usize)>,
+    composing: Option<(usize, String)>,
+}
+
 /// A scrollable region extracted from the flat list, used for momentum scrolling.
 struct ScrollItem {
-    x: f32, y: f32, w: f32, h: f32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
     offset_x: Signal<f32>,
     offset_y: Signal<f32>,
     max_x: f32,
@@ -76,17 +94,21 @@ struct ScrollItem {
 }
 
 struct WindowState {
-    window:        Arc<Window>,
-    renderer:      Renderer,
-    build_view:    Box<dyn Fn(&WindowOpener) -> (Theme, View)>,
-    theme:         Theme,
-    cursor_pos:    (f32, f32),
-    frame:         u32,
-    hit_items:     Vec<HitItem>,
-    scroll_items:  Vec<ScrollItem>,
-    scroll_vx:     f32,
-    scroll_vy:     f32,
-    last_scroll:   Option<Instant>,
+    window: Arc<Window>,
+    renderer: Renderer,
+    build_view: BuildViewFn,
+    theme: Theme,
+    cursor_pos: (f32, f32),
+    frame: u32,
+    hit_items: Vec<HitItem>,
+    scroll_items: Vec<ScrollItem>,
+    scroll_vx: f32,
+    scroll_vy: f32,
+    last_scroll: Option<Instant>,
+    flat_cache: Vec<FlatView>,
+    scroll_only: bool,
+    modifiers: ModifiersState,
+    text_edit: TextEditState,
 }
 
 impl WindowState {
@@ -117,11 +139,11 @@ impl WindowState {
 // ---------------------------------------------------------------------------
 
 pub struct App {
-    ctx:       Option<Arc<GpuContext>>,
-    windows:   HashMap<WindowId, WindowState>,
-    opener:    WindowOpener,
-    queue:     Arc<Mutex<Vec<WindowRequest>>>,
-    initial:   Option<WindowRequest>,
+    ctx: Option<Arc<GpuContext>>,
+    windows: HashMap<WindowId, WindowState>,
+    opener: WindowOpener,
+    queue: Arc<Mutex<Vec<WindowRequest>>>,
+    initial: Option<WindowRequest>,
     last_tick: Option<Instant>,
 }
 
@@ -154,7 +176,11 @@ impl App {
     }
 
     fn open_window(&mut self, req: WindowRequest, event_loop: &ActiveEventLoop) {
-        let ctx = self.ctx.as_ref().expect("GpuContext not initialised").clone();
+        let ctx = self
+            .ctx
+            .as_ref()
+            .expect("GpuContext not initialised")
+            .clone();
         let window = Arc::new(
             event_loop
                 .create_window(
@@ -169,19 +195,26 @@ impl App {
             ctx.create_surface(Arc::clone(&window), size.width.max(1), size.height.max(1));
         let renderer = Renderer::new(Arc::clone(&ctx), surface, surface_cfg);
         let id = window.id();
-        self.windows.insert(id, WindowState {
-            window,
-            renderer,
-            build_view: req.build_view,
-            theme: req.theme,
-            cursor_pos: (0.0, 0.0),
-            frame: 0,
-            hit_items: Vec::new(),
-            scroll_items: Vec::new(),
-            scroll_vx: 0.0,
-            scroll_vy: 0.0,
-            last_scroll: None,
-        });
+        self.windows.insert(
+            id,
+            WindowState {
+                window,
+                renderer,
+                build_view: req.build_view,
+                theme: req.theme,
+                cursor_pos: (0.0, 0.0),
+                frame: 0,
+                hit_items: Vec::new(),
+                scroll_items: Vec::new(),
+                scroll_vx: 0.0,
+                scroll_vy: 0.0,
+                last_scroll: None,
+                flat_cache: Vec::new(),
+                scroll_only: false,
+                modifiers: ModifiersState::empty(),
+                text_edit: TextEditState::default(),
+            },
+        );
     }
 }
 
@@ -209,25 +242,34 @@ impl ApplicationHandler for App {
                 ctx.create_surface(Arc::clone(&window), size.width.max(1), size.height.max(1));
             let renderer = Renderer::new(ctx, surface, surface_cfg);
             let id = window.id();
-            self.windows.insert(id, WindowState {
-                window,
-                renderer,
-                build_view: req.build_view,
-                theme: req.theme,
-                cursor_pos: (0.0, 0.0),
-                frame: 0,
-                hit_items: Vec::new(),
-            scroll_items: Vec::new(),
-            scroll_vx: 0.0,
-            scroll_vy: 0.0,
-            last_scroll: None,
-            });
+            self.windows.insert(
+                id,
+                WindowState {
+                    window,
+                    renderer,
+                    build_view: req.build_view,
+                    theme: req.theme,
+                    cursor_pos: (0.0, 0.0),
+                    frame: 0,
+                    hit_items: Vec::new(),
+                    scroll_items: Vec::new(),
+                    scroll_vx: 0.0,
+                    scroll_vy: 0.0,
+                    last_scroll: None,
+                    flat_cache: Vec::new(),
+                    scroll_only: false,
+                    modifiers: ModifiersState::empty(),
+                    text_edit: TextEditState::default(),
+                },
+            );
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let dt = self.last_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32())
+        let dt = self
+            .last_tick
+            .map_or(0.0, |t| now.duration_since(t).as_secs_f32())
             .min(0.05); // cap dt so a stalled frame doesn't cause a huge jump
         self.last_tick = Some(now);
 
@@ -251,6 +293,7 @@ impl ApplicationHandler for App {
                 let decay = (-dt / 0.35).exp();
                 ws.scroll_vx *= decay;
                 ws.scroll_vy *= decay;
+                ws.scroll_only = true;
                 ws.window.request_redraw();
             } else {
                 ws.scroll_vx = 0.0;
@@ -262,10 +305,13 @@ impl ApplicationHandler for App {
         // This ensures we render at display rate during trackpad momentum (which macOS
         // delivers as continued PixelDelta events) rather than at event-delivery rate.
         let recently_scrolled = self.windows.values().any(|ws| {
-            ws.last_scroll.map_or(false, |t| now.duration_since(t).as_millis() < 100)
+            ws.last_scroll
+                .is_some_and(|t| now.duration_since(t).as_millis() < 100)
         });
         if any_scrolling || recently_scrolled {
-            for ws in self.windows.values() { ws.window.request_redraw(); }
+            for ws in self.windows.values() {
+                ws.window.request_redraw();
+            }
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         } else {
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
@@ -289,7 +335,6 @@ impl ApplicationHandler for App {
                 if self.windows.is_empty() {
                     event_loop.exit();
                 }
-                return;
             }
 
             WindowEvent::Resized(size) => {
@@ -297,11 +342,12 @@ impl ApplicationHandler for App {
                     ws.renderer.resize(size.width, size.height);
                     ws.window.request_redraw();
                 }
-                return;
             }
 
             WindowEvent::CursorMoved { position, .. } => {
-                let Some(ws) = self.windows.get_mut(&id) else { return };
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
                 let scale = ws.scale();
                 let (px, py) = (position.x as f32 / scale, position.y as f32 / scale);
                 ws.cursor_pos = (px, py);
@@ -311,14 +357,24 @@ impl ApplicationHandler for App {
                 let mut icon = CursorIcon::Default;
                 let mut needs_rebuild = false;
                 for item in &ws.hit_items {
-                    let hit = px >= item.x && px <= item.x + item.w
-                           && py >= item.y && py <= item.y + item.h;
+                    let hit = px >= item.x
+                        && px <= item.x + item.w
+                        && py >= item.y
+                        && py <= item.y + item.h;
                     match &item.kind {
                         HitKind::Button(has_hover) => {
-                            if hit { icon = CursorIcon::Pointer; }
-                            if *has_hover { needs_rebuild = true; }
+                            if hit {
+                                icon = CursorIcon::Pointer;
+                            }
+                            if *has_hover {
+                                needs_rebuild = true;
+                            }
                         }
-                        HitKind::Text => { if hit { icon = CursorIcon::Text; } }
+                        HitKind::Text => {
+                            if hit {
+                                icon = CursorIcon::Text;
+                            }
+                        }
                     }
                 }
                 ws.window.set_cursor(Cursor::Icon(icon));
@@ -331,40 +387,66 @@ impl ApplicationHandler for App {
                     for fv in &flat {
                         let l = fv.layout.location.x;
                         let t = fv.layout.location.y;
-                        let hit = px >= l && px <= l + fv.layout.size.width
-                               && py >= t && py <= t + fv.layout.size.height;
-                        if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
+                        let hit = px >= l
+                            && px <= l + fv.layout.size.width
+                            && py >= t
+                            && py <= t + fv.layout.size.height;
+                        if let FlatViewKind::Button {
+                            on_hover: Some(on_hover),
+                            ..
+                        } = &fv.kind
+                        {
                             on_hover(hit);
                             changed = true;
                         }
                     }
-                    if changed { ws.window.request_redraw(); }
+                    if changed {
+                        ws.window.request_redraw();
+                    }
                 }
-                return;
             }
 
             WindowEvent::CursorLeft { .. } => {
-                let Some(ws) = self.windows.get_mut(&id) else { return };
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
                 ws.window.set_cursor(Cursor::Icon(CursorIcon::Default));
-                let has_hover_btns = ws.hit_items.iter().any(|i| matches!(&i.kind, HitKind::Button(true)));
+                let has_hover_btns = ws
+                    .hit_items
+                    .iter()
+                    .any(|i| matches!(&i.kind, HitKind::Button(true)));
                 if has_hover_btns {
                     let (w, h) = (ws.lw(), ws.lh());
                     let view = ws.build(&opener);
                     let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
                     let mut changed = false;
                     for fv in &flat {
-                        if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
+                        if let FlatViewKind::Button {
+                            on_hover: Some(on_hover),
+                            ..
+                        } = &fv.kind
+                        {
                             on_hover(false);
                             changed = true;
                         }
                     }
-                    if changed { ws.window.request_redraw(); }
+                    if changed {
+                        ws.window.request_redraw();
+                    }
                 }
-                return;
+            }
+
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
+                ws.modifiers = modifiers.state();
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
-                let Some(ws) = self.windows.get_mut(&id) else { return };
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
                 let scale = ws.scale();
                 let (cur_x, cur_y) = ws.cursor_pos;
                 match delta {
@@ -387,12 +469,18 @@ impl ApplicationHandler for App {
                     }
                 }
                 ws.last_scroll = Some(Instant::now());
+                ws.scroll_only = true;
                 ws.window.request_redraw();
-                return;
             }
 
-            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
-                let Some(ws) = self.windows.get_mut(&id) else { return };
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
                 let (cx, cy) = ws.cursor_pos;
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
@@ -400,13 +488,18 @@ impl ApplicationHandler for App {
                 let flat = scale_flat(flat, ws.scale());
                 let pressed = state == ElementState::Pressed;
                 let mut clicked = false;
-                for fv in &flat {
+                let mut hit_text_input = false;
+                for (idx, fv) in flat.iter().enumerate() {
                     let l = fv.layout.location.x;
                     let t = fv.layout.location.y;
-                    let hit = cx * ws.scale() >= l && cx * ws.scale() <= l + fv.layout.size.width
-                           && cy * ws.scale() >= t && cy * ws.scale() <= t + fv.layout.size.height;
+                    let hit = cx >= l
+                        && cx <= l + fv.layout.size.width
+                        && cy >= t
+                        && cy <= t + fv.layout.size.height;
                     match &fv.kind {
-                        FlatViewKind::Button { on_click, on_press, .. } => {
+                        FlatViewKind::Button {
+                            on_click, on_press, ..
+                        } => {
                             if hit {
                                 if let Some(op) = on_press {
                                     op(pressed);
@@ -422,20 +515,51 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        FlatViewKind::TextInput { focused, cursor, value, font_size, .. } => {
+                        FlatViewKind::TextInput {
+                            focused,
+                            cursor,
+                            value,
+                            font_size,
+                            ..
+                        } => {
                             if pressed {
                                 focused.set(hit);
+                                ws.window.set_ime_allowed(hit);
                                 if hit {
+                                    hit_text_input = true;
                                     ws.frame = 0;
                                     let val = value.get();
                                     let pad = 8.0;
-                                    let click_offset = (cx * ws.scale() - l - pad * ws.scale()).max(0.0);
-                                    let byte_idx = ws.renderer.cursor_for_x(&val, font_size * ws.scale(), click_offset);
+                                    let click_offset = (cx - l - pad).max(0.0);
+                                    let byte_idx = ws.renderer.cursor_for_x(
+                                        &val,
+                                        *font_size,
+                                        click_offset,
+                                    );
                                     cursor.set(byte_idx);
+                                    ws.text_edit.focused_flat_index = Some(idx);
+                                    ws.text_edit.composing = None;
+                                    if ws.modifiers.shift_key() {
+                                        let anchor =
+                                            ws.text_edit.selection_anchor.unwrap_or(cursor.get());
+                                        ws.text_edit.selection_anchor = Some(anchor);
+                                        ws.text_edit.selection =
+                                            normalized_selection(anchor, byte_idx);
+                                    } else {
+                                        ws.text_edit.selection_anchor = None;
+                                        ws.text_edit.selection = None;
+                                    }
                                 }
                             }
                         }
-                        FlatViewKind::TextArea { focused, cursor, value, font_size, scroll_y, .. } => {
+                        FlatViewKind::TextArea {
+                            focused,
+                            cursor,
+                            value,
+                            font_size,
+                            scroll_y,
+                            ..
+                        } => {
                             if pressed {
                                 focused.set(hit);
                                 if hit {
@@ -443,13 +567,19 @@ impl ApplicationHandler for App {
                                     let val = value.get();
                                     let line_height = font_size * ws.scale() * 1.4;
                                     let pad = 8.0 * ws.scale();
-                                    let rel_y = cy * ws.scale() - t - pad + scroll_y.get() * ws.scale();
+                                    let rel_y =
+                                        cy * ws.scale() - t - pad + scroll_y.get() * ws.scale();
                                     let line_idx = (rel_y / line_height).floor().max(0.0) as usize;
                                     let lines: Vec<&str> = val.split('\n').collect();
                                     let line_idx = line_idx.min(lines.len().saturating_sub(1));
-                                    let mut byte_offset: usize = lines[..line_idx].iter().map(|l| l.len() + 1).sum();
+                                    let mut byte_offset: usize =
+                                        lines[..line_idx].iter().map(|l| l.len() + 1).sum();
                                     let rel_x = (cx * ws.scale() - l - pad).max(0.0);
-                                    let line_cursor = ws.renderer.cursor_for_x(lines[line_idx], font_size * ws.scale(), rel_x);
+                                    let line_cursor = ws.renderer.cursor_for_x(
+                                        lines[line_idx],
+                                        font_size * ws.scale(),
+                                        rel_x,
+                                    );
                                     byte_offset += line_cursor;
                                     cursor.set(byte_offset.min(val.len()));
                                 }
@@ -458,22 +588,112 @@ impl ApplicationHandler for App {
                         _ => {}
                     }
                 }
-                if needs_redraw() { clear_redraw(); }
+                if pressed && !hit_text_input {
+                    ws.text_edit = TextEditState::default();
+                    ws.window.set_ime_allowed(false);
+                }
+                if needs_redraw() {
+                    clear_redraw();
+                }
                 ws.window.request_redraw();
-                return;
+            }
+
+            WindowEvent::Ime(ime) => {
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
+                let (w, h) = (ws.lw(), ws.lh());
+                let view = ws.build(&opener);
+                let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                let Some(idx) = ws.text_edit.focused_flat_index else {
+                    return;
+                };
+                let Some(fv) = flat.get(idx) else {
+                    return;
+                };
+                if let FlatViewKind::TextInput {
+                    value,
+                    focused,
+                    cursor,
+                    on_change,
+                    ..
+                } = &fv.kind
+                {
+                    if !focused.get() {
+                        return;
+                    }
+                    match ime {
+                        winit::event::Ime::Preedit(text, _) => {
+                            let mut s = value.get();
+                            let mut cur = cursor.get().min(s.len());
+                            if !text.is_empty() && ws.text_edit.composing.is_none()
+                                && delete_selection(&mut s, &mut cur, ws.text_edit.selection) {
+                                    value.set(s);
+                                    cursor.set(cur);
+                                    ws.text_edit.selection = None;
+                                    ws.text_edit.selection_anchor = None;
+                                }
+                            ws.text_edit.composing = if text.is_empty() {
+                                None
+                            } else {
+                                Some((cur, text))
+                            };
+                            ws.window.request_redraw();
+                        }
+                        winit::event::Ime::Commit(text) => {
+                            let mut s = value.get();
+                            let mut cur = cursor.get().min(s.len());
+                            delete_selection(&mut s, &mut cur, ws.text_edit.selection);
+                            s.insert_str(cur, &text);
+                            cur += text.len();
+                            value.set(s.clone());
+                            cursor.set(cur);
+                            ws.text_edit.selection = None;
+                            ws.text_edit.selection_anchor = None;
+                            ws.text_edit.composing = None;
+                            if let Some(f) = on_change {
+                                f(s);
+                            }
+                            if needs_redraw() {
+                                clear_redraw();
+                            }
+                            ws.window.request_redraw();
+                        }
+                        winit::event::Ime::Enabled => {}
+                        winit::event::Ime::Disabled => {
+                            ws.text_edit.composing = None;
+                            ws.window.request_redraw();
+                        }
+                    }
+                }
             }
 
             WindowEvent::KeyboardInput {
-                event: KeyEvent { logical_key, state: ElementState::Pressed, .. }, ..
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
             } => {
-                let Some(ws) = self.windows.get_mut(&id) else { return };
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
 
                 // Collect text-input and text-area indices for Tab cycling.
-                let input_indices: Vec<usize> = flat.iter().enumerate()
-                    .filter(|(_, fv)| matches!(&fv.kind, FlatViewKind::TextInput { .. } | FlatViewKind::TextArea { .. }))
+                let input_indices: Vec<usize> = flat
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, fv)| {
+                        matches!(
+                            &fv.kind,
+                            FlatViewKind::TextInput { .. } | FlatViewKind::TextArea { .. }
+                        )
+                    })
                     .map(|(i, _)| i)
                     .collect();
 
@@ -481,15 +701,43 @@ impl ApplicationHandler for App {
                 let mut handled = false;
                 for (pos, &idx) in input_indices.iter().enumerate() {
                     match &flat[idx].kind {
-                        FlatViewKind::TextInput { value, focused, cursor, on_change, on_submit, .. } => {
-                            if !focused.get() { continue; }
+                        FlatViewKind::TextInput {
+                            value,
+                            focused,
+                            cursor,
+                            on_change,
+                            on_submit,
+                            ..
+                        } => {
+                            if !focused.get() {
+                                continue;
+                            }
+                            ws.text_edit.focused_flat_index = Some(idx);
                             let mut s = value.get();
                             let mut cur = cursor.get().min(s.len());
                             let mut changed = false;
+                            let command = ws.modifiers.super_key() || ws.modifiers.control_key();
                             match &logical_key {
+                                Key::Character(ch)
+                                    if command && ch.as_str().eq_ignore_ascii_case("a") =>
+                                {
+                                    ws.text_edit.selection_anchor = Some(0);
+                                    ws.text_edit.selection = normalized_selection(0, s.len());
+                                    cursor.set(s.len());
+                                }
                                 Key::Named(NamedKey::Backspace) => {
-                                    if cur > 0 {
-                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                    if delete_selection(&mut s, &mut cur, ws.text_edit.selection) {
+                                        value.set(s.clone());
+                                        cursor.set(cur);
+                                        ws.text_edit.selection = None;
+                                        ws.text_edit.selection_anchor = None;
+                                        changed = true;
+                                    } else if cur > 0 {
+                                        let prev = s[..cur]
+                                            .char_indices()
+                                            .next_back()
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(0);
                                         s.remove(prev);
                                         cur = prev;
                                         value.set(s.clone());
@@ -498,7 +746,13 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 Key::Named(NamedKey::Delete) => {
-                                    if cur < s.len() {
+                                    if delete_selection(&mut s, &mut cur, ws.text_edit.selection) {
+                                        value.set(s.clone());
+                                        cursor.set(cur);
+                                        ws.text_edit.selection = None;
+                                        ws.text_edit.selection_anchor = None;
+                                        changed = true;
+                                    } else if cur < s.len() {
                                         s.remove(cur);
                                         value.set(s.clone());
                                         changed = true;
@@ -506,59 +760,131 @@ impl ApplicationHandler for App {
                                 }
                                 Key::Named(NamedKey::ArrowLeft) => {
                                     if cur > 0 {
-                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        let prev = s[..cur]
+                                            .char_indices()
+                                            .next_back()
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(0);
                                         cursor.set(prev);
+                                        update_selection_for_move(
+                                            &mut ws.text_edit,
+                                            cur,
+                                            prev,
+                                            ws.modifiers.shift_key(),
+                                        );
                                     }
                                 }
                                 Key::Named(NamedKey::ArrowRight) => {
                                     if cur < s.len() {
-                                        let next = s[cur..].char_indices().nth(1).map(|(i, _)| cur + i).unwrap_or(s.len());
+                                        let next = s[cur..]
+                                            .char_indices()
+                                            .nth(1)
+                                            .map(|(i, _)| cur + i)
+                                            .unwrap_or(s.len());
                                         cursor.set(next);
+                                        update_selection_for_move(
+                                            &mut ws.text_edit,
+                                            cur,
+                                            next,
+                                            ws.modifiers.shift_key(),
+                                        );
                                     }
                                 }
                                 Key::Named(NamedKey::Space) => {
+                                    delete_selection(&mut s, &mut cur, ws.text_edit.selection);
                                     s.insert(cur, ' ');
                                     cur += 1;
                                     value.set(s.clone());
                                     cursor.set(cur);
+                                    ws.text_edit.selection = None;
+                                    ws.text_edit.selection_anchor = None;
                                     changed = true;
                                 }
-                                Key::Named(NamedKey::Home) => { cursor.set(0); }
-                                Key::Named(NamedKey::End) => { cursor.set(s.len()); }
-                                Key::Named(NamedKey::Escape) => { focused.set(false); }
+                                Key::Named(NamedKey::Home) => {
+                                    cursor.set(0);
+                                    update_selection_for_move(
+                                        &mut ws.text_edit,
+                                        cur,
+                                        0,
+                                        ws.modifiers.shift_key(),
+                                    );
+                                }
+                                Key::Named(NamedKey::End) => {
+                                    cursor.set(s.len());
+                                    update_selection_for_move(
+                                        &mut ws.text_edit,
+                                        cur,
+                                        s.len(),
+                                        ws.modifiers.shift_key(),
+                                    );
+                                }
+                                Key::Named(NamedKey::Escape) => {
+                                    focused.set(false);
+                                    ws.text_edit = TextEditState::default();
+                                    ws.window.set_ime_allowed(false);
+                                }
                                 Key::Named(NamedKey::Tab) => {
                                     focused.set(false);
                                     let next_idx = input_indices[(pos + 1) % input_indices.len()];
                                     set_focused_at(&flat, next_idx, true);
+                                    ws.window.set_ime_allowed(true);
+                                    ws.text_edit = TextEditState {
+                                        focused_flat_index: Some(next_idx),
+                                        ..TextEditState::default()
+                                    };
                                 }
                                 Key::Named(NamedKey::Enter) => {
-                                    if let Some(f) = on_submit { f(value.get()); }
+                                    if let Some(f) = on_submit {
+                                        f(value.get());
+                                    }
                                     focused.set(false);
+                                    ws.text_edit = TextEditState::default();
+                                    ws.window.set_ime_allowed(false);
                                 }
-                                Key::Character(ch) => {
+                                Key::Character(ch) if !command => {
+                                    delete_selection(&mut s, &mut cur, ws.text_edit.selection);
                                     s.insert_str(cur, ch.as_str());
                                     cur += ch.len();
                                     value.set(s.clone());
                                     cursor.set(cur);
+                                    ws.text_edit.selection = None;
+                                    ws.text_edit.selection_anchor = None;
+                                    ws.text_edit.composing = None;
                                     changed = true;
                                 }
                                 _ => {}
                             }
                             if changed {
-                                if let Some(f) = on_change { f(s); }
+                                if let Some(f) = on_change {
+                                    f(s);
+                                }
                             }
                             handled = true;
                             break;
                         }
-                        FlatViewKind::TextArea { value, focused, cursor, scroll_y, on_change, font_size, .. } => {
-                            if !focused.get() { continue; }
+                        FlatViewKind::TextArea {
+                            value,
+                            focused,
+                            cursor,
+                            scroll_y,
+                            on_change,
+                            font_size,
+                            ..
+                        } => {
+                            if !focused.get() {
+                                continue;
+                            }
                             let mut s = value.get();
                             let mut cur = cursor.get().min(s.len());
                             let mut changed = false;
                             match &logical_key {
                                 Key::Named(NamedKey::Backspace) => {
                                     if cur > 0 {
-                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        let prev = s[..cur]
+                                            .char_indices()
+                                            .next_back()
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(0);
                                         s.remove(prev);
                                         cur = prev;
                                         value.set(s.clone());
@@ -575,13 +901,21 @@ impl ApplicationHandler for App {
                                 }
                                 Key::Named(NamedKey::ArrowLeft) => {
                                     if cur > 0 {
-                                        let prev = s[..cur].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                                        let prev = s[..cur]
+                                            .char_indices()
+                                            .next_back()
+                                            .map(|(i, _)| i)
+                                            .unwrap_or(0);
                                         cursor.set(prev);
                                     }
                                 }
                                 Key::Named(NamedKey::ArrowRight) => {
                                     if cur < s.len() {
-                                        let next = s[cur..].char_indices().nth(1).map(|(i, _)| cur + i).unwrap_or(s.len());
+                                        let next = s[cur..]
+                                            .char_indices()
+                                            .nth(1)
+                                            .map(|(i, _)| cur + i)
+                                            .unwrap_or(s.len());
                                         cursor.set(next);
                                     }
                                 }
@@ -612,9 +946,15 @@ impl ApplicationHandler for App {
                                     cursor.set(cur);
                                     changed = true;
                                 }
-                                Key::Named(NamedKey::Home) => { cursor.set(0); }
-                                Key::Named(NamedKey::End) => { cursor.set(s.len()); }
-                                Key::Named(NamedKey::Escape) => { focused.set(false); }
+                                Key::Named(NamedKey::Home) => {
+                                    cursor.set(0);
+                                }
+                                Key::Named(NamedKey::End) => {
+                                    cursor.set(s.len());
+                                }
+                                Key::Named(NamedKey::Escape) => {
+                                    focused.set(false);
+                                }
                                 Key::Named(NamedKey::Tab) => {
                                     focused.set(false);
                                     let next_idx = input_indices[(pos + 1) % input_indices.len()];
@@ -637,7 +977,9 @@ impl ApplicationHandler for App {
                                 _ => {}
                             }
                             if changed {
-                                if let Some(f) = on_change { f(s); }
+                                if let Some(f) = on_change {
+                                    f(s);
+                                }
                             }
                             handled = true;
                             break;
@@ -646,50 +988,172 @@ impl ApplicationHandler for App {
                     }
                 }
                 let _ = handled;
-                if needs_redraw() { clear_redraw(); }
+                if needs_redraw() {
+                    clear_redraw();
+                }
                 ws.window.request_redraw();
-                return;
             }
 
             WindowEvent::RedrawRequested => {
-                let Some(ws) = self.windows.get_mut(&id) else { return };
+                let Some(ws) = self.windows.get_mut(&id) else {
+                    return;
+                };
                 ws.frame = ws.frame.wrapping_add(1);
                 let cursor_visible = (ws.frame / 30) % 2 == 0;
                 let scale = ws.scale();
+
+                // Fast path: scroll only — re-render cached flat list with updated offsets.
+                if ws.scroll_only && !ws.flat_cache.is_empty() {
+                    ws.scroll_only = false;
+                    // Rebuild hit items with new offsets (cheap — no layout).
+                    {
+                        let mut scroll_stack: Vec<(f32, f32)> = Vec::new();
+                        let mut pending: Option<(f32, f32)> = None;
+                        let mut hit_items: Vec<HitItem> = Vec::new();
+                        for fv in &ws.flat_cache {
+                            match &fv.kind {
+                                FlatViewKind::ScrollRegion {
+                                    offset_x, offset_y, ..
+                                } => {
+                                    pending = Some((offset_x.get(), offset_y.get()));
+                                }
+                                FlatViewKind::ClipStart { .. } => {
+                                    scroll_stack.push(pending.take().unwrap_or((0.0, 0.0)));
+                                }
+                                FlatViewKind::ClipEnd => {
+                                    scroll_stack.pop();
+                                }
+                                _ => {
+                                    let sox: f32 = scroll_stack.iter().map(|(ox, _)| ox).sum();
+                                    let soy: f32 = scroll_stack.iter().map(|(_, oy)| oy).sum();
+                                    let x = fv.layout.location.x - sox;
+                                    let y = fv.layout.location.y - soy;
+                                    let w = fv.layout.size.width;
+                                    let h = fv.layout.size.height;
+                                    let item = match &fv.kind {
+                                        FlatViewKind::Button { on_hover, .. } => Some(HitItem {
+                                            x,
+                                            y,
+                                            w,
+                                            h,
+                                            kind: HitKind::Button(on_hover.is_some()),
+                                        }),
+                                        FlatViewKind::TextInput { .. }
+                                        | FlatViewKind::TextArea { .. } => Some(HitItem {
+                                            x,
+                                            y,
+                                            w,
+                                            h,
+                                            kind: HitKind::Text,
+                                        }),
+                                        _ => None,
+                                    };
+                                    if let Some(item) = item {
+                                        hit_items.push(item);
+                                    }
+                                }
+                            }
+                        }
+                        ws.hit_items = hit_items;
+                    }
+                    let flat = scale_flat(ws.flat_cache.clone(), scale);
+                    ws.renderer
+                        .render(&flat, cursor_visible, ws.theme.background);
+                    return;
+                }
+                ws.scroll_only = false;
+
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
-                let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                let mut flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                decorate_text_input_state(&mut flat, &ws.text_edit);
                 let any_focused = flat.iter().any(|fv| {
                     matches!(&fv.kind, FlatViewKind::TextInput { focused, .. } if focused.get())
                     || matches!(&fv.kind, FlatViewKind::TextArea { focused, .. } if focused.get())
                 });
-                if any_focused { ws.window.request_redraw(); }
-                ws.hit_items = flat.iter().filter_map(|fv| {
-                    let (x, y, w, h) = (fv.layout.location.x, fv.layout.location.y, fv.layout.size.width, fv.layout.size.height);
-                    match &fv.kind {
-                        FlatViewKind::Button { on_hover, .. } =>
-                            Some(HitItem { x, y, w, h, kind: HitKind::Button(on_hover.is_some()) }),
-                        FlatViewKind::TextInput { .. } | FlatViewKind::TextArea { .. } =>
-                            Some(HitItem { x, y, w, h, kind: HitKind::Text }),
-                        _ => None,
+                if any_focused {
+                    ws.window.request_redraw();
+                }
+                {
+                    let mut scroll_stack: Vec<(f32, f32)> = Vec::new();
+                    let mut pending: Option<(f32, f32)> = None;
+                    let mut hit_items: Vec<HitItem> = Vec::new();
+                    for fv in &flat {
+                        match &fv.kind {
+                            FlatViewKind::ScrollRegion {
+                                offset_x, offset_y, ..
+                            } => {
+                                pending = Some((offset_x.get(), offset_y.get()));
+                            }
+                            FlatViewKind::ClipStart { .. } => {
+                                scroll_stack.push(pending.take().unwrap_or((0.0, 0.0)));
+                            }
+                            FlatViewKind::ClipEnd => {
+                                scroll_stack.pop();
+                            }
+                            _ => {
+                                let sox: f32 = scroll_stack.iter().map(|(ox, _)| ox).sum();
+                                let soy: f32 = scroll_stack.iter().map(|(_, oy)| oy).sum();
+                                let x = fv.layout.location.x - sox;
+                                let y = fv.layout.location.y - soy;
+                                let w = fv.layout.size.width;
+                                let h = fv.layout.size.height;
+                                let item = match &fv.kind {
+                                    FlatViewKind::Button { on_hover, .. } => Some(HitItem {
+                                        x,
+                                        y,
+                                        w,
+                                        h,
+                                        kind: HitKind::Button(on_hover.is_some()),
+                                    }),
+                                    FlatViewKind::TextInput { .. }
+                                    | FlatViewKind::TextArea { .. } => Some(HitItem {
+                                        x,
+                                        y,
+                                        w,
+                                        h,
+                                        kind: HitKind::Text,
+                                    }),
+                                    _ => None,
+                                };
+                                if let Some(item) = item {
+                                    hit_items.push(item);
+                                }
+                            }
+                        }
                     }
-                }).collect();
-                ws.scroll_items = flat.iter().filter_map(|fv| {
-                    let l = fv.layout;
-                    if let FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y } = &fv.kind {
-                        Some(ScrollItem {
-                            x: l.location.x, y: l.location.y,
-                            w: l.size.width,  h: l.size.height,
-                            offset_x: offset_x.clone(),
-                            offset_y: offset_y.clone(),
-                            max_x: *max_x,
-                            max_y: *max_y,
-                        })
-                    } else { None }
-                }).collect();
+                    ws.hit_items = hit_items;
+                }
+                ws.scroll_items = flat
+                    .iter()
+                    .filter_map(|fv| {
+                        let l = fv.layout;
+                        if let FlatViewKind::ScrollRegion {
+                            offset_x,
+                            offset_y,
+                            max_x,
+                            max_y,
+                        } = &fv.kind
+                        {
+                            Some(ScrollItem {
+                                x: l.location.x,
+                                y: l.location.y,
+                                w: l.size.width,
+                                h: l.size.height,
+                                offset_x: offset_x.clone(),
+                                offset_y: offset_y.clone(),
+                                max_x: *max_x,
+                                max_y: *max_y,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                ws.flat_cache = flat.clone();
                 let flat = scale_flat(flat, scale);
-                ws.renderer.render(flat, cursor_visible, ws.theme.background);
-                return;
+                ws.renderer
+                    .render(&flat, cursor_visible, ws.theme.background);
             }
 
             _ => {}
@@ -727,49 +1191,235 @@ fn set_focused_at(flat: &[FlatView], idx: usize, focused: bool) {
     }
 }
 
+fn normalized_selection(anchor: usize, cursor: usize) -> Option<(usize, usize)> {
+    if anchor == cursor {
+        None
+    } else {
+        Some((anchor.min(cursor), anchor.max(cursor)))
+    }
+}
+
+fn update_selection_for_move(
+    edit: &mut TextEditState,
+    old_cursor: usize,
+    new_cursor: usize,
+    extend: bool,
+) {
+    if extend {
+        let anchor = edit.selection_anchor.unwrap_or(old_cursor);
+        edit.selection_anchor = Some(anchor);
+        edit.selection = normalized_selection(anchor, new_cursor);
+    } else {
+        edit.selection_anchor = None;
+        edit.selection = None;
+    }
+    edit.composing = None;
+}
+
+fn delete_selection(s: &mut String, cursor: &mut usize, selection: Option<(usize, usize)>) -> bool {
+    let Some((start, end)) = selection else {
+        return false;
+    };
+    let start = start.min(s.len());
+    let end = end.min(s.len());
+    if start >= end || !s.is_char_boundary(start) || !s.is_char_boundary(end) {
+        return false;
+    }
+    s.replace_range(start..end, "");
+    *cursor = start;
+    true
+}
+
+fn decorate_text_input_state(flat: &mut [FlatView], edit: &TextEditState) {
+    let Some(idx) = edit.focused_flat_index else {
+        return;
+    };
+    let Some(fv) = flat.get_mut(idx) else {
+        return;
+    };
+    if let FlatViewKind::TextInput {
+        selection,
+        composing,
+        ..
+    } = &mut fv.kind
+    {
+        *selection = edit.selection;
+        *composing = edit.composing.clone();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // DPI scaling: layout runs in logical pixels; renderer works in physical pixels.
 // Scale every position, size, and font size in the flat list before rendering.
 // ---------------------------------------------------------------------------
 
 fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
-    if (scale - 1.0).abs() < f32::EPSILON { return flat; }
-    flat.into_iter().map(|fv| {
-        let l = &fv.layout;
-        let mut layout = *l;
-        layout.location.x *= scale;
-        layout.location.y *= scale;
-        layout.size.width  *= scale;
-        layout.size.height *= scale;
-        let kind = match fv.kind {
-            FlatViewKind::Text { content, font_size, color, weight, align, wrap } =>
-                FlatViewKind::Text { content, font_size: font_size * scale, color, weight, align, wrap },
-            FlatViewKind::Button { label, on_click, on_hover, on_press, bg_color, hover_bg_color, press_bg_color, text_color, corner_radius, font_size } =>
-                FlatViewKind::Button { label, on_click, on_hover, on_press, bg_color, hover_bg_color, press_bg_color, text_color, corner_radius: corner_radius * scale, font_size: font_size * scale },
-            FlatViewKind::TextInput { value, focused, cursor, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change, on_submit } =>
-                FlatViewKind::TextInput { value, focused, cursor, placeholder, font_size: font_size * scale, bg_color, text_color, border_color, corner_radius: corner_radius * scale, on_change, on_submit },
-            FlatViewKind::ContainerRect { bg_color, border_color, border_width, corner_radius, shadow } => {
-                let shadow = shadow.map(|s| glyph_core::Shadow {
-                    offset_x: s.offset_x * scale,
-                    offset_y: s.offset_y * scale,
-                    blur: s.blur * scale,
-                    color: s.color,
-                });
-                FlatViewKind::ContainerRect { bg_color, border_color, border_width: border_width * scale, corner_radius: corner_radius * scale, shadow }
-            }
-            FlatViewKind::ClipStart { x, y, width, height } =>
-                FlatViewKind::ClipStart { x: x * scale, y: y * scale, width: width * scale, height: height * scale },
-            FlatViewKind::Image { path, corner_radius } =>
-                FlatViewKind::Image { path, corner_radius: corner_radius * scale },
-            FlatViewKind::TextArea { value, focused, cursor, scroll_y, placeholder, font_size, bg_color, text_color, border_color, corner_radius, on_change } =>
-                FlatViewKind::TextArea { value, focused, cursor, scroll_y, placeholder, font_size: font_size * scale, bg_color, text_color, border_color, corner_radius: corner_radius * scale, on_change },
-            // ScrollRegion is logical-pixel metadata only; renderer ignores it.
-            FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y } =>
-                FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y },
-            other => other,
-        };
-        FlatView { kind, layout }
-    }).collect()
+    if (scale - 1.0).abs() < f32::EPSILON {
+        return flat;
+    }
+    flat.into_iter()
+        .map(|fv| {
+            let l = &fv.layout;
+            let mut layout = *l;
+            layout.location.x *= scale;
+            layout.location.y *= scale;
+            layout.size.width *= scale;
+            layout.size.height *= scale;
+            let kind = match fv.kind {
+                FlatViewKind::Text {
+                    content,
+                    font_size,
+                    color,
+                    weight,
+                    align,
+                    wrap,
+                } => FlatViewKind::Text {
+                    content,
+                    font_size: font_size * scale,
+                    color,
+                    weight,
+                    align,
+                    wrap,
+                },
+                FlatViewKind::Button {
+                    label,
+                    on_click,
+                    on_hover,
+                    on_press,
+                    bg_color,
+                    hover_bg_color,
+                    press_bg_color,
+                    text_color,
+                    corner_radius,
+                    font_size,
+                    wrap,
+                } => FlatViewKind::Button {
+                    label,
+                    on_click,
+                    on_hover,
+                    on_press,
+                    bg_color,
+                    hover_bg_color,
+                    press_bg_color,
+                    text_color,
+                    corner_radius: corner_radius * scale,
+                    font_size: font_size * scale,
+                    wrap,
+                },
+                FlatViewKind::TextInput {
+                    value,
+                    focused,
+                    cursor,
+                    placeholder,
+                    font_size,
+                    bg_color,
+                    text_color,
+                    border_color,
+                    corner_radius,
+                    on_change,
+                    on_submit,
+                    selection,
+                    composing,
+                } => FlatViewKind::TextInput {
+                    value,
+                    focused,
+                    cursor,
+                    placeholder,
+                    font_size: font_size * scale,
+                    bg_color,
+                    text_color,
+                    border_color,
+                    corner_radius: corner_radius * scale,
+                    on_change,
+                    on_submit,
+                    selection,
+                    composing,
+                },
+                FlatViewKind::ContainerRect {
+                    bg_color,
+                    border_color,
+                    border_width,
+                    corner_radius,
+                    shadow,
+                } => {
+                    let shadow = shadow.map(|s| glyph_core::Shadow {
+                        offset_x: s.offset_x * scale,
+                        offset_y: s.offset_y * scale,
+                        blur: s.blur * scale,
+                        color: s.color,
+                    });
+                    FlatViewKind::ContainerRect {
+                        bg_color,
+                        border_color,
+                        border_width: border_width * scale,
+                        corner_radius: corner_radius * scale,
+                        shadow,
+                    }
+                }
+                FlatViewKind::ClipStart {
+                    x,
+                    y,
+                    width,
+                    height,
+                } => FlatViewKind::ClipStart {
+                    x: x * scale,
+                    y: y * scale,
+                    width: width * scale,
+                    height: height * scale,
+                },
+                FlatViewKind::Image {
+                    path,
+                    corner_radius,
+                } => FlatViewKind::Image {
+                    path,
+                    corner_radius: corner_radius * scale,
+                },
+                FlatViewKind::TextArea {
+                    value,
+                    focused,
+                    cursor,
+                    scroll_y,
+                    placeholder,
+                    font_size,
+                    bg_color,
+                    text_color,
+                    border_color,
+                    corner_radius,
+                    on_change,
+                } => FlatViewKind::TextArea {
+                    value,
+                    focused,
+                    cursor,
+                    scroll_y,
+                    placeholder,
+                    font_size: font_size * scale,
+                    bg_color,
+                    text_color,
+                    border_color,
+                    corner_radius: corner_radius * scale,
+                    on_change,
+                },
+                FlatViewKind::Rect { color, corner_radius } => FlatViewKind::Rect {
+                    color,
+                    corner_radius: corner_radius * scale,
+                },
+                // ScrollRegion is logical-pixel metadata only; renderer ignores it.
+                FlatViewKind::ScrollRegion {
+                    offset_x,
+                    offset_y,
+                    max_x,
+                    max_y,
+                } => FlatViewKind::ScrollRegion {
+                    offset_x,
+                    offset_y,
+                    max_x,
+                    max_y,
+                },
+                other => other,
+            };
+            FlatView { kind, layout }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -780,8 +1430,7 @@ fn apply_scroll(items: &[ScrollItem], cx: f32, cy: f32, dx: f32, dy: f32) {
     // Iterate in reverse so the last-emitted (innermost/deepest) container is
     // checked first. Stop as soon as a container absorbs the scroll delta.
     for item in items.iter().rev() {
-        if cx >= item.x && cx <= item.x + item.w
-        && cy >= item.y && cy <= item.y + item.h {
+        if cx >= item.x && cx <= item.x + item.w && cy >= item.y && cy <= item.y + item.h {
             let cur_x = item.offset_x.get();
             let cur_y = item.offset_y.get();
             let nx = (cur_x - dx).clamp(0.0, item.max_x);
@@ -815,10 +1464,21 @@ fn dispatch_scroll(
     flat_idx: &mut usize,
 ) {
     match view {
-        View::Scroll { child, offset_x, offset_y, .. } => {
+        View::Scroll {
+            child,
+            offset_x,
+            offset_y,
+            ..
+        } => {
             *flat_idx += 1; // skip ScrollRegion
             if let Some(fv) = flat.get(*flat_idx) {
-                if let FlatViewKind::ClipStart { x, y, width, height } = &fv.kind {
+                if let FlatViewKind::ClipStart {
+                    x,
+                    y,
+                    width,
+                    height,
+                } = &fv.kind
+                {
                     if cx >= *x && cx <= x + width && cy >= *y && cy <= y + height {
                         offset_x.set((offset_x.get() - dx).max(0.0));
                         offset_y.set((offset_y.get() - dy).max(0.0));
@@ -829,16 +1489,34 @@ fn dispatch_scroll(
             dispatch_scroll(child, theme, flat, cx, cy, dx, dy, flat_idx);
             *flat_idx += 1;
         }
-        View::Column { children, bg_color, border_color, shadow, clip, .. }
-        | View::Row { children, bg_color, border_color, shadow, clip, .. } => {
+        View::Column {
+            children,
+            bg_color,
+            border_color,
+            shadow,
+            clip,
+            ..
+        }
+        | View::Row {
+            children,
+            bg_color,
+            border_color,
+            shadow,
+            clip,
+            ..
+        } => {
             if bg_color.is_some() || border_color.is_some() || shadow.is_some() {
                 *flat_idx += 1;
             }
-            if *clip { *flat_idx += 1; }
+            if *clip {
+                *flat_idx += 1;
+            }
             for child in children {
                 dispatch_scroll(child, theme, flat, cx, cy, dx, dy, flat_idx);
             }
-            if *clip { *flat_idx += 1; }
+            if *clip {
+                *flat_idx += 1;
+            }
         }
         View::ZStack { children, .. } => {
             for child in children {
@@ -849,16 +1527,33 @@ fn dispatch_scroll(
             let rendered = c.render(theme);
             dispatch_scroll(&rendered, theme, flat, cx, cy, dx, dy, flat_idx);
         }
-        View::Button { .. } | View::Rect { .. } | View::Text { .. }
-        | View::TextInput { .. } | View::Image { .. } | View::TextArea { .. } => {
+        View::Button { .. }
+        | View::Rect { .. }
+        | View::Text { .. }
+        | View::TextInput { .. }
+        | View::Image { .. }
+        | View::TextArea { .. } => {
             *flat_idx += 1;
         }
-        View::VirtualList { item_count, row_height, offset_y, viewport_height, .. } => {
+        View::VirtualList {
+            item_count,
+            row_height,
+            offset_y,
+            viewport_height,
+            ..
+        } => {
             *flat_idx += 1; // skip ScrollRegion
             if let Some(fv) = flat.get(*flat_idx) {
-                if let FlatViewKind::ClipStart { x, y, width, height } = &fv.kind {
+                if let FlatViewKind::ClipStart {
+                    x,
+                    y,
+                    width,
+                    height,
+                } = &fv.kind
+                {
                     if cx >= *x && cx <= x + width && cy >= *y && cy <= y + height {
-                        let max_scroll = ((*item_count as f32) * row_height - viewport_height).max(0.0);
+                        let max_scroll =
+                            ((*item_count as f32) * row_height - viewport_height).max(0.0);
                         offset_y.set((offset_y.get() - dy).clamp(0.0, max_scroll));
                     }
                 }
@@ -870,9 +1565,17 @@ fn dispatch_scroll(
             let mut depth = 1usize;
             while *flat_idx < flat.len() && depth > 0 {
                 match &flat[*flat_idx].kind {
-                    FlatViewKind::ClipStart { .. } => { depth += 1; *flat_idx += 1; }
-                    FlatViewKind::ClipEnd => { depth -= 1; *flat_idx += 1; }
-                    _ => { *flat_idx += 1; }
+                    FlatViewKind::ClipStart { .. } => {
+                        depth += 1;
+                        *flat_idx += 1;
+                    }
+                    FlatViewKind::ClipEnd => {
+                        depth -= 1;
+                        *flat_idx += 1;
+                    }
+                    _ => {
+                        *flat_idx += 1;
+                    }
                 }
             }
         }
@@ -885,6 +1588,31 @@ fn dispatch_scroll(
             *flat_idx += 1; // OpacityEnd
         }
         View::Spacer => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_selection_removes_valid_byte_range_and_moves_cursor() {
+        let mut value = "hello".to_string();
+        let mut cursor = 4;
+
+        assert!(delete_selection(&mut value, &mut cursor, Some((1, 4))));
+        assert_eq!(value, "ho");
+        assert_eq!(cursor, 1);
+    }
+
+    #[test]
+    fn delete_selection_rejects_non_char_boundaries() {
+        let mut value = "éx".to_string();
+        let mut cursor = value.len();
+
+        assert!(!delete_selection(&mut value, &mut cursor, Some((1, 2))));
+        assert_eq!(value, "éx");
+        assert_eq!(cursor, 3);
     }
 }
 
@@ -904,10 +1632,10 @@ pub struct HotApp {
 
 #[cfg(feature = "hot-reload")]
 struct HotAppState {
-    window:     Arc<Window>,
-    renderer:   Renderer,
+    window: Arc<Window>,
+    renderer: Renderer,
     cursor_pos: (f32, f32),
-    frame:      u32,
+    frame: u32,
 }
 
 #[cfg(feature = "hot-reload")]
@@ -924,7 +1652,14 @@ impl HotApp {
         let loader = glyph_hot::HotLoader::new(src_dir.as_ref(), lib_path.as_ref(), package_name);
         let event_loop = EventLoop::new().expect("event loop");
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-        let mut app = HotApp { loader, theme, title: title.into(), width, height, state: None };
+        let mut app = HotApp {
+            loader,
+            theme,
+            title: title.into(),
+            width,
+            height,
+            state: None,
+        };
         event_loop.run_app(&mut app).expect("event loop run");
     }
 }
@@ -932,7 +1667,9 @@ impl HotApp {
 #[cfg(feature = "hot-reload")]
 impl ApplicationHandler for HotApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_some() { return; }
+        if self.state.is_some() {
+            return;
+        }
         let window = Arc::new(
             event_loop
                 .create_window(
@@ -944,11 +1681,15 @@ impl ApplicationHandler for HotApp {
         );
         let size = window.inner_size();
         let ctx = pollster::block_on(GpuContext::new_with_window(Arc::clone(&window)));
-        let (surface, surface_cfg) = ctx.create_surface(
-            Arc::clone(&window), size.width.max(1), size.height.max(1),
-        );
+        let (surface, surface_cfg) =
+            ctx.create_surface(Arc::clone(&window), size.width.max(1), size.height.max(1));
         let renderer = Renderer::new(ctx, surface, surface_cfg);
-        self.state = Some(HotAppState { window, renderer, cursor_pos: (0.0, 0.0), frame: 0 });
+        self.state = Some(HotAppState {
+            window,
+            renderer,
+            cursor_pos: (0.0, 0.0),
+            frame: 0,
+        });
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
@@ -975,19 +1716,28 @@ impl ApplicationHandler for HotApp {
                 let w = state.renderer.surface_cfg.width as f32 / scale;
                 let h = state.renderer.surface_cfg.height as f32 / scale;
                 if let Some(view) = self.loader.build_view(&self.theme) {
-                    let flat = ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
+                    let flat =
+                        ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
                     let mut changed = false;
                     for fv in &flat {
                         let l = fv.layout.location.x;
                         let t = fv.layout.location.y;
-                        let hit = px >= l && px <= l + fv.layout.size.width
-                               && py >= t && py <= t + fv.layout.size.height;
-                        if let FlatViewKind::Button { on_hover: Some(on_hover), .. } = &fv.kind {
+                        let hit = px >= l
+                            && px <= l + fv.layout.size.width
+                            && py >= t
+                            && py <= t + fv.layout.size.height;
+                        if let FlatViewKind::Button {
+                            on_hover: Some(on_hover),
+                            ..
+                        } = &fv.kind
+                        {
                             on_hover(hit);
                             changed = true;
                         }
                     }
-                    if changed { state.window.request_redraw(); }
+                    if changed {
+                        state.window.request_redraw();
+                    }
                 }
             }
 
@@ -997,86 +1747,147 @@ impl ApplicationHandler for HotApp {
                     MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
                 };
                 let (cx, cy) = state.cursor_pos;
-                let scale = state.window.scale_factor() as f32; let w = state.renderer.surface_cfg.width as f32 / scale;
+                let scale = state.window.scale_factor() as f32;
+                let w = state.renderer.surface_cfg.width as f32 / scale;
                 let h = state.renderer.surface_cfg.height as f32 / scale;
                 if let Some(view) = self.loader.build_view(&self.theme) {
-                    let flat = ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
+                    let flat =
+                        ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
                     if let Some(view2) = self.loader.build_view(&self.theme) {
                         let mut idx = 0;
                         dispatch_scroll(&view2, &self.theme, &flat, cx, cy, dx, dy, &mut idx);
                     }
                 }
-                if needs_redraw() { clear_redraw(); state.window.request_redraw(); }
+                if needs_redraw() {
+                    clear_redraw();
+                    state.window.request_redraw();
+                }
             }
 
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } => {
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
                 let (cx, cy) = state.cursor_pos;
-                let scale = state.window.scale_factor() as f32; let w = state.renderer.surface_cfg.width as f32 / scale;
+                let scale = state.window.scale_factor() as f32;
+                let w = state.renderer.surface_cfg.width as f32 / scale;
                 let h = state.renderer.surface_cfg.height as f32 / scale;
                 if let Some(view) = self.loader.build_view(&self.theme) {
-                    let flat = ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
+                    let flat =
+                        ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
                     for fv in &flat {
                         let l = fv.layout.location.x;
                         let t = fv.layout.location.y;
-                        let hit = cx >= l && cx <= l + fv.layout.size.width
-                               && cy >= t && cy <= t + fv.layout.size.height;
+                        let hit = cx >= l
+                            && cx <= l + fv.layout.size.width
+                            && cy >= t
+                            && cy <= t + fv.layout.size.height;
                         match &fv.kind {
-                            FlatViewKind::Button { on_click, .. } => { if hit { on_click(); } }
+                            FlatViewKind::Button { on_click, .. } => {
+                                if hit {
+                                    on_click();
+                                }
+                            }
                             FlatViewKind::TextInput { focused, .. } => {
                                 focused.set(hit);
-                                if hit { state.frame = 0; }
+                                if hit {
+                                    state.frame = 0;
+                                }
                             }
                             _ => {}
                         }
                     }
                 }
-                if needs_redraw() { clear_redraw(); }
+                if needs_redraw() {
+                    clear_redraw();
+                }
                 state.window.request_redraw();
             }
 
-            WindowEvent::KeyboardInput { event: KeyEvent { logical_key, state: ElementState::Pressed, .. }, .. } => {
-                let scale = state.window.scale_factor() as f32; let w = state.renderer.surface_cfg.width as f32 / scale;
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => {
+                let scale = state.window.scale_factor() as f32;
+                let w = state.renderer.surface_cfg.width as f32 / scale;
                 let h = state.renderer.surface_cfg.height as f32 / scale;
                 if let Some(view) = self.loader.build_view(&self.theme) {
-                    let flat = ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
+                    let flat =
+                        ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
                     for fv in &flat {
-                        if let FlatViewKind::TextInput { value, focused, on_submit, .. } = &fv.kind {
-                            if !focused.get() { continue; }
+                        if let FlatViewKind::TextInput {
+                            value,
+                            focused,
+                            on_submit,
+                            ..
+                        } = &fv.kind
+                        {
+                            if !focused.get() {
+                                continue;
+                            }
                             let mut s = value.get();
                             match &logical_key {
                                 Key::Named(NamedKey::Backspace) => {
-                                    if let Some((idx, _)) = s.char_indices().next_back() { s.truncate(idx); value.set(s); }
+                                    if let Some((idx, _)) = s.char_indices().next_back() {
+                                        s.truncate(idx);
+                                        value.set(s);
+                                    }
                                 }
-                                Key::Named(NamedKey::Delete)  => { value.set(String::new()); }
-                                Key::Named(NamedKey::Escape)  => { focused.set(false); }
-                                Key::Named(NamedKey::Tab)     => { focused.set(false); }
-                                Key::Named(NamedKey::Enter)   => {
-                                    if let Some(f) = on_submit { f(value.get()); }
+                                Key::Named(NamedKey::Delete) => {
+                                    value.set(String::new());
+                                }
+                                Key::Named(NamedKey::Escape) => {
                                     focused.set(false);
                                 }
-                                Key::Character(ch) => { s.push_str(ch.as_str()); value.set(s); }
+                                Key::Named(NamedKey::Tab) => {
+                                    focused.set(false);
+                                }
+                                Key::Named(NamedKey::Enter) => {
+                                    if let Some(f) = on_submit {
+                                        f(value.get());
+                                    }
+                                    focused.set(false);
+                                }
+                                Key::Character(ch) => {
+                                    s.push_str(ch.as_str());
+                                    value.set(s);
+                                }
                                 _ => {}
                             }
                         }
                     }
                 }
-                if needs_redraw() { clear_redraw(); }
+                if needs_redraw() {
+                    clear_redraw();
+                }
                 state.window.request_redraw();
             }
 
             WindowEvent::RedrawRequested => {
                 state.frame = state.frame.wrapping_add(1);
                 let cursor_visible = (state.frame / 30) % 2 == 0;
-                let scale = state.window.scale_factor() as f32; let w = state.renderer.surface_cfg.width as f32 / scale;
+                let scale = state.window.scale_factor() as f32;
+                let w = state.renderer.surface_cfg.width as f32 / scale;
                 let h = state.renderer.surface_cfg.height as f32 / scale;
                 if let Some(view) = self.loader.build_view(&self.theme) {
-                    let flat = ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
+                    let flat =
+                        ViewTree::build(view, &self.theme, w, h, &mut state.renderer.measurer());
                     let any_focused = flat.iter().any(|fv| {
                         matches!(&fv.kind, FlatViewKind::TextInput { focused, .. } if focused.get())
                     });
-                    if any_focused { state.window.request_redraw(); }
+                    if any_focused {
+                        state.window.request_redraw();
+                    }
                     let flat = scale_flat(flat, scale);
-                    state.renderer.render(flat, cursor_visible, self.theme.background);
+                    state
+                        .renderer
+                        .render(flat, cursor_visible, self.theme.background);
                 }
             }
 

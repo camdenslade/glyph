@@ -81,7 +81,7 @@ impl HotLoader {
                 match event.kind {
                     EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
                         let is_rs = event.paths.iter().any(|p| {
-                            p.extension().map_or(false, |e| e == "rs")
+                            p.extension().is_some_and(|e| e == "rs")
                         });
                         if is_rs {
                             dirty2.store(true, Ordering::Relaxed);

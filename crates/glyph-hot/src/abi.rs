@@ -93,17 +93,17 @@ unsafe impl Sync for CCallback1Str {}
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CViewTag {
-    Text       = 0,
-    Button     = 1,
-    Column     = 2,
-    Row        = 3,
-    ZStack     = 4,
-    Scroll     = 5,
-    Image      = 6,
-    TextInput  = 7,
-    Rect       = 8,
-    Flexible   = 9,
-    Spacer     = 10,
+    Text = 0,
+    Button = 1,
+    Column = 2,
+    Row = 3,
+    ZStack = 4,
+    Scroll = 5,
+    Image = 6,
+    TextInput = 7,
+    Rect = 8,
+    Flexible = 9,
+    Spacer = 10,
 }
 
 /// A heap-allocated, null-terminated UTF-8 string owned by the guest.
@@ -130,7 +130,7 @@ pub struct CTextData {
     /// 0 = no wrap, 1 = wrap
     pub wrap: u8,
     pub _pad: u8,
-    pub max_width: f32,   // 0.0 = unconstrained
+    pub max_width: f32, // 0.0 = unconstrained
 }
 
 // Button
@@ -148,6 +148,9 @@ pub struct CButtonData {
     pub text_color: CColor,
     pub corner_radius: f32,
     pub font_size: f32,
+    /// 0 = no wrap, 1 = wrap
+    pub wrap: u8,
+    pub _pad3: [u8; 3],
 }
 
 // Column / Row — share the same data shape
@@ -156,8 +159,8 @@ pub struct CContainerData {
     pub children: CChildren,
     pub gap: f32,
     pub padding: f32,
-    pub align_items: u8,  // 0=Start,1=Center,2=End,3=Stretch
-    pub justify: u8,      // 0=Start,1=Center,2=End,3=SpaceBetween,4=SpaceAround,5=SpaceEvenly
+    pub align_items: u8, // 0=Start,1=Center,2=End,3=Stretch
+    pub justify: u8,     // 0=Start,1=Center,2=End,3=SpaceBetween,4=SpaceAround,5=SpaceEvenly
     pub has_bg: u8,
     pub has_border: u8,
     pub has_shadow: u8,
@@ -168,7 +171,7 @@ pub struct CContainerData {
     pub border_width: f32,
     pub corner_radius: f32,
     pub shadow: CShadow,
-    pub width: f32,    // 0.0 = percent(1.0) default; -1.0 = auto
+    pub width: f32, // 0.0 = percent(1.0) default; -1.0 = auto
     pub height: f32,
     pub grow: f32,
 }
@@ -281,14 +284,15 @@ pub struct GlyphSignalTable {
 // Guest dylib symbol names (looked up by the host via libloading)
 // ---------------------------------------------------------------------------
 
-pub const SYM_CREATE_STATE:  &[u8] = b"glyph_create_state\0";
-pub const SYM_BUILD_VIEW:    &[u8] = b"glyph_build_view\0";
+pub const SYM_CREATE_STATE: &[u8] = b"glyph_create_state\0";
+pub const SYM_BUILD_VIEW: &[u8] = b"glyph_build_view\0";
 pub const SYM_DESTROY_STATE: &[u8] = b"glyph_destroy_state\0";
-pub const SYM_FREE_NODE:     &[u8] = b"glyph_hot_free_node\0";
-pub const SYM_FREE_STR:      &[u8] = b"glyph_hot_free_str\0";
+pub const SYM_FREE_NODE: &[u8] = b"glyph_hot_free_node\0";
+pub const SYM_FREE_STR: &[u8] = b"glyph_hot_free_str\0";
 
-pub type FnCreateState  = unsafe extern "C" fn(signals: *mut GlyphSignalTable) -> *mut c_void;
-pub type FnBuildView    = unsafe extern "C" fn(state: *mut c_void, theme: *const CTheme) -> *mut CViewDesc;
+pub type FnCreateState = unsafe extern "C" fn(signals: *mut GlyphSignalTable) -> *mut c_void;
+pub type FnBuildView =
+    unsafe extern "C" fn(state: *mut c_void, theme: *const CTheme) -> *mut CViewDesc;
 pub type FnDestroyState = unsafe extern "C" fn(state: *mut c_void);
-pub type FnFreeNode     = unsafe extern "C" fn(node: *mut CViewDesc);
-pub type FnFreeStr      = unsafe extern "C" fn(s: *mut c_char);
+pub type FnFreeNode = unsafe extern "C" fn(node: *mut CViewDesc);
+pub type FnFreeStr = unsafe extern "C" fn(s: *mut c_char);

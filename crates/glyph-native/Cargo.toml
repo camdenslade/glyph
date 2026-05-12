@@ -2,9 +2,12 @@
 name = "glyph-native"
 version = "0.1.0"
 edition = "2021"
+description = "macOS AppKit native bridge for the Glyph UI framework"
+repository = "https://github.com/camslade/glyph"
+license = "MIT"
 
 [dependencies]
-glyph-core = { path = "../glyph-core" }
+glyph-core = { version = "0.1.0", path = "../glyph-core" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2            = "0.5"

@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 /// Time-based value interpolation driven by the platform event loop.
 ///
 /// # Usage

@@ -9,5 +9,6 @@ members = [
     "crates/glyph-github",
     "crates/glyph-widgets",
     "crates/glyph-hot",
+    "crates/glyph-ui",
 ]
 resolver = "2"

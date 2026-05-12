@@ -1,3 +1,4 @@
+#![allow(clippy::wrong_self_convention)]
 use crate::theme::Theme;
 use crate::view::View;
 
@@ -25,7 +26,7 @@ use crate::view::View;
 ///                 .text_color(theme.on_primary)
 ///                 .radius(theme.radius)
 ///                 .into(),
-///         ])
+///         ]).into()
 ///     }
 /// }
 /// ```
