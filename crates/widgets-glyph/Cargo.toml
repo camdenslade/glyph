@@ -3,7 +3,7 @@ name = "widgets-glyph"
 version = "0.1.0"
 edition = "2021"
 description = "Pre-built interactive widgets for the Glyph UI framework"
-repository = "https://github.com/camslade/glyph"
+repository = "https://github.com/camdenslade/glyph"
 license = "MIT"
 
 [dependencies]
