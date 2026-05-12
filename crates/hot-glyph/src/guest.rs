@@ -3,18 +3,18 @@
 ///
 /// # Usage
 ///
-/// ```rust
-/// // In your guest cdylib crate (e.g. glyph-demo with crate-type = ["cdylib"]):
+/// ```rust,ignore
+/// // In your guest cdylib crate (e.g. demo-glyph with crate-type = ["cdylib"]):
 /// use hot_glyph::guest::glyph_guest;
 ///
 /// struct MyApp { /* Signal handles from GlyphSignalTable */ }
 ///
 /// impl MyApp {
-///     pub fn new(signals: &hot_glyph::abi::GlyphSignalTable) -> Self { ... }
+///     pub fn new(signals: &hot_glyph::abi::GlyphSignalTable) -> Self { todo!() }
 /// }
 ///
 /// impl core_glyph::Component for MyApp {
-///     fn render(&self, theme: &core_glyph::Theme) -> core_glyph::View { ... }
+///     fn render(&self, theme: &core_glyph::Theme) -> core_glyph::View { todo!() }
 /// }
 ///
 /// glyph_guest!(MyApp);
