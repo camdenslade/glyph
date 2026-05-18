@@ -24,13 +24,14 @@ Glyph is a desktop UI framework built on [wgpu](https://github.com/gfx-rs/wgpu) 
 
 ```rust
 App::run(
-    |theme, _opener| {
+    |_opener, _closer| {
+        let theme = Theme::light();
         let view = column(vec![
             text("Hello, Glyph!", 32.0).color(theme.text).into(),
         ])
         .padding(32.0)
         .into();
-        (theme.clone(), view)
+        (theme, view)
     },
     Theme::light(),
     "My App",
@@ -59,7 +60,8 @@ fn main() {
     let count = Signal::new(0i32);
 
     App::run(
-        move |theme, _opener| {
+        move |_opener, _closer| {
+            let theme = Theme::light();
             let c = count.clone();
             let view = row(vec![
                 text(format!("Count: {}", count.get()), 24.0)
@@ -74,7 +76,7 @@ fn main() {
             .gap(16.0)
             .padding(32.0)
             .into();
-            (theme.clone(), view)
+            (theme, view)
         },
         Theme::light(),
         "Counter",
@@ -90,11 +92,15 @@ Open new windows from any button callback via the `WindowOpener` handle:
 
 ```rust
 App::run(
-    move |theme, opener| {
+    move |opener, _closer| {
+        let theme = Theme::light();
         let o = opener.clone();
         let view = button("Open second window", move || {
             o.open(
-                |t, _| (t.clone(), text("Hello from window 2!", 24.0).into()),
+                |_opener, _closer| {
+                    let t = Theme::dark();
+                    (t.clone(), text("Hello from window 2!", 24.0).color(t.text).into())
+                },
                 "Window 2",
                 400.0,
                 200.0,
@@ -105,7 +111,7 @@ App::run(
         .text_color(theme.on_primary)
         .radius(theme.radius)
         .into();
-        (theme.clone(), view)
+        (theme, view)
     },
     Theme::light(),
     "Main",
@@ -169,7 +175,8 @@ Layout is computed by [Taffy](https://github.com/DioxusLabs/taffy) (flexbox) eac
 | GPU rect + text + image rendering | ✅ |
 | Signal-driven redraws | ✅ |
 | Flexbox layout (Taffy) | ✅ |
-| Text input with cursor, selection, IME | ✅ |
+| Text input with cursor, selection, scroll | ✅ |
+| Text area (multi-line, auto-scroll) | ✅ |
 | Mouse hit-test, click, hover, scroll | ✅ |
 | Container backgrounds, borders, shadows | ✅ |
 | Rounded corners (SDF, any radius) | ✅ |
@@ -182,7 +189,7 @@ Layout is computed by [Taffy](https://github.com/DioxusLabs/taffy) (flexbox) eac
 | Hot-reload | ✅ |
 | Widget library (Checkbox, Toggle, Slider, …) | ✅ |
 | macOS AppKit native bridge | ✅ |
-| Custom fonts | ❌ |
+| Custom fonts | ✅ |
 | Accessibility | ❌ |
 | Linux / Windows | wgpu handles backends; untested |
 

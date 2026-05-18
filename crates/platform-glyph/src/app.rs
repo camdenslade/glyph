@@ -199,7 +199,7 @@ pub struct App {
 
 /// Builder for configuring an `App` before running it.
 pub struct AppBuilder {
-    build_view: Box<dyn Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send + 'static>,
+    build_view: BuildViewFn,
     theme: Theme,
     title: String,
     width: f64,
@@ -1252,6 +1252,7 @@ impl ApplicationHandler for App {
                     let mut items = Vec::new();
                     // Stack of (offset_x_signal, offset_y_signal) for enclosing scroll regions.
                     let mut enclosing_stack: Vec<(Signal<f32>, Signal<f32>)> = Vec::new();
+                    #[allow(clippy::type_complexity)]
                     let mut pending: Option<(Signal<f32>, Signal<f32>, f32, f32, core_glyph::TaffyLayout)> = None;
                     for fv in &flat {
                         match &fv.kind {
