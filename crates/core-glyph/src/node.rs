@@ -99,7 +99,7 @@ impl LayoutNode {
         let l = &self.layout;
         let s = &self.style;
 
-        let view = match self.kind {
+        match self.kind {
             NodeKind::Column => {
                 let mut v = column(children);
                 if let Some(g) = l.gap { v = v.gap(g); }
@@ -175,9 +175,7 @@ impl LayoutNode {
                     Signal::new((-1.0, -1.0)),
                 ).into()
             }
-        };
-
-        view
+        }
     }
 }
 
