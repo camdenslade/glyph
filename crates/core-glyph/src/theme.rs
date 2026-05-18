@@ -4,6 +4,7 @@ use crate::view::Color;
 /// rather than hardcoding colors so the entire app can be restyled by swapping
 /// one `Theme` value.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Theme {
     /// Window/page background.
     pub background: Color,

@@ -270,6 +270,7 @@ pub use components::{
     card_flat,
     card_opts,
     card_section,
+    card_section_dark,
     card_section_footer,
     code_block,
     code_block_dark,
@@ -295,6 +296,7 @@ pub use components::{
     icon_label,
     icon_label_muted,
     kbd,
+    kbd_dark,
     list_item,
     list_item_with_trailing,
     // List
@@ -331,8 +333,10 @@ pub use components::{
     stat_card,
     stat_card_dark,
     stat_card_with_change,
+    stat_card_with_change_dark,
     // Navigation
     tab_bar,
+    tab_bar_dark,
     tab_bar_underline,
     // Table
     table_header,

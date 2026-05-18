@@ -12,6 +12,12 @@
   <a href="#quick-start">Quick Start</a> · <a href="#example">Example</a> · <a href="#crates">Crates</a> · <a href="#status">Status</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/camdenslade/glyph"><img src="https://img.shields.io/badge/github-camdenslade%2Fglyph-8da0cb?logo=github" alt="GitHub" /></a>
+  <a href="https://crates.io/crates/platform-glyph"><img src="https://img.shields.io/crates/v/platform-glyph.svg?label=crates.io" alt="crates.io" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT" /></a>
+</p>
+
 ---
 
 Glyph is a desktop UI framework built on [wgpu](https://github.com/gfx-rs/wgpu) and [Taffy](https://github.com/DioxusLabs/taffy). You describe your interface as a `View` tree, bind state with `Signal<T>`, and the platform loop redraws automatically on every write.
@@ -36,7 +42,7 @@ App::run(
 ## Quick Start
 
 ```sh
-git clone https://github.com/camslade/glyph
+git clone https://github.com/camdenslade/glyph
 cd glyph
 cargo run -p demo-glyph
 ```
@@ -145,14 +151,14 @@ Layout is computed by [Taffy](https://github.com/DioxusLabs/taffy) (flexbox) eac
 
 | Crate | Role |
 |---|---|
-| `core-glyph` | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
-| `text-glyph` | cosmic-text shaping, glyph atlas, text measurement |
-| `render-glyph` | wgpu pipelines, rect / text / image renderer |
-| `platform-glyph` | winit event loop, hit-test, click / hover / scroll / keyboard |
-| `native-glyph` | macOS AppKit bridge (objc2) |
-| `widgets-glyph` | pre-built widgets: `Checkbox`, `Toggle`, `Slider`, `RadioGroup`, `Select` |
-| `ui-glyph` | design system: Tailwind-style color palette, spacing tokens, typography helpers, layout primitives, and a full component library (`card`, `badge`, `avatar`, `alert`, `tab_bar`, …) |
-| `hot-glyph` | hot-reload dylib loader |
+| [`core-glyph`](https://crates.io/crates/core-glyph) | `View` tree, `Signal<T>`, Taffy layout, flat quad output |
+| [`text-glyph`](https://crates.io/crates/text-glyph) | cosmic-text shaping, glyph atlas, text measurement |
+| [`render-glyph`](https://crates.io/crates/render-glyph) | wgpu pipelines, rect / text / image renderer |
+| [`platform-glyph`](https://crates.io/crates/platform-glyph) | winit event loop, hit-test, click / hover / scroll / keyboard |
+| [`native-glyph`](https://crates.io/crates/native-glyph) | macOS AppKit bridge (objc2) |
+| [`widgets-glyph`](https://crates.io/crates/widgets-glyph) | pre-built widgets: `Checkbox`, `Toggle`, `Slider`, `RadioGroup`, `Select` |
+| [`ui-glyph`](https://crates.io/crates/ui-glyph) | design system: Tailwind-style color palette, spacing tokens, typography helpers, layout primitives, and a full component library (`card`, `badge`, `avatar`, `alert`, `tab_bar`, …) |
+| [`hot-glyph`](https://crates.io/crates/hot-glyph) | hot-reload dylib loader |
 | `demo-glyph` | interactive demo app |
 | `github-glyph` | GitHub dashboard example app |
 

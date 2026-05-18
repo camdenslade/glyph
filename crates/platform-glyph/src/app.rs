@@ -1,6 +1,7 @@
 use core_glyph::{
     clear_redraw, needs_redraw, tick_tweens, FlatView, FlatViewKind, Signal, Theme, View, ViewTree,
 };
+use std::path::PathBuf;
 use render_glyph::{GpuContext, Renderer};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,9 +16,10 @@ use winit::{
 
 // ---------------------------------------------------------------------------
 // WindowOpener — cheaply cloneable handle for opening new windows from closures
+// WindowCloser — cheaply cloneable handle for closing the current window
 // ---------------------------------------------------------------------------
 
-type BuildViewFn = Box<dyn Fn(&WindowOpener) -> (Theme, View) + Send>;
+type BuildViewFn = Box<dyn Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send>;
 
 pub struct WindowRequest {
     pub build_view: BuildViewFn,
@@ -39,7 +41,7 @@ impl WindowOpener {
 
     pub fn open(
         &self,
-        build_view: impl Fn(&WindowOpener) -> (Theme, View) + Send + 'static,
+        build_view: impl Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send + 'static,
         title: impl Into<String>,
         width: f64,
         height: f64,
@@ -52,6 +54,39 @@ impl WindowOpener {
             height,
             theme,
         });
+    }
+}
+
+/// Clone this into button callbacks to close the window it was created for.
+///
+/// The closer is bound to a specific window: calling `close()` queues
+/// that window for removal at the next event-loop tick.
+#[derive(Clone)]
+pub struct WindowCloser {
+    /// The id of the window this closer is bound to.  Populated by
+    /// `open_window` immediately after the OS window is created.
+    id: Arc<Mutex<Option<WindowId>>>,
+    /// Shared queue on `App` — draining this closes windows.
+    queue: Arc<Mutex<Vec<WindowId>>>,
+}
+
+impl WindowCloser {
+    fn new(queue: Arc<Mutex<Vec<WindowId>>>) -> Self {
+        Self {
+            id: Arc::new(Mutex::new(None)),
+            queue,
+        }
+    }
+
+    fn set_id(&self, id: WindowId) {
+        *self.id.lock().unwrap() = Some(id);
+    }
+
+    /// Request that this window be closed at the next event loop tick.
+    pub fn close(&self) {
+        if let Some(id) = *self.id.lock().unwrap() {
+            self.queue.lock().unwrap().push(id);
+        }
     }
 }
 
@@ -83,20 +118,25 @@ struct TextEditState {
 
 /// A scrollable region extracted from the flat list, used for momentum scrolling.
 struct ScrollItem {
-    x: f32,
-    y: f32,
+    /// Content-space position of this scroll region.
+    cx: f32,
+    cy: f32,
     w: f32,
     h: f32,
     offset_x: Signal<f32>,
     offset_y: Signal<f32>,
     max_x: f32,
     max_y: f32,
+    /// Signals for each enclosing scroll region, in order from outermost to innermost.
+    /// Used to compute the live screen-space position: content_pos - sum(enclosing offsets).
+    enclosing: Vec<(Signal<f32>, Signal<f32>)>,
 }
 
 struct WindowState {
     window: Arc<Window>,
     renderer: Renderer,
     build_view: BuildViewFn,
+    closer: WindowCloser,
     theme: Theme,
     cursor_pos: (f32, f32),
     frame: u32,
@@ -106,15 +146,21 @@ struct WindowState {
     scroll_vy: f32,
     last_scroll: Option<Instant>,
     flat_cache: Vec<FlatView>,
-    scroll_only: bool,
+    scaled_cache: Vec<FlatView>,
     modifiers: ModifiersState,
     text_edit: TextEditState,
+    /// Set when a scroll event arrives; cleared after each redraw. When true and
+    /// no VirtualList row range changed, we skip ViewTree::build and re-render
+    /// scaled_cache directly (scroll offsets are read live from signals by the renderer).
+    scroll_dirty: bool,
+    /// Cached VirtualList row ranges: (offset_y, first_row, last_row) per list.
+    vlist_ranges: Vec<f32>,
 }
 
 impl WindowState {
     /// Call `build_view`, update `self.theme` from the returned theme, return the view.
     fn build(&mut self, opener: &WindowOpener) -> View {
-        let (theme, view) = (self.build_view)(opener);
+        let (theme, view) = (self.build_view)(opener, &self.closer);
         self.theme = theme;
         view
     }
@@ -143,25 +189,48 @@ pub struct App {
     windows: HashMap<WindowId, WindowState>,
     opener: WindowOpener,
     queue: Arc<Mutex<Vec<WindowRequest>>>,
+    /// Windows requested to close via `WindowCloser::close()`.
+    pending_close: Arc<Mutex<Vec<WindowId>>>,
     initial: Option<WindowRequest>,
     last_tick: Option<Instant>,
+    pending_fonts: Vec<Vec<u8>>,
+    pending_font_files: Vec<PathBuf>,
 }
 
-impl App {
-    pub fn run(
-        build_view: impl Fn(&WindowOpener) -> (Theme, View) + Send + 'static,
-        theme: Theme,
-        title: impl Into<String>,
-        width: f64,
-        height: f64,
-    ) {
+/// Builder for configuring an `App` before running it.
+pub struct AppBuilder {
+    build_view: Box<dyn Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send + 'static>,
+    theme: Theme,
+    title: String,
+    width: f64,
+    height: f64,
+    fonts: Vec<Vec<u8>>,
+    font_files: Vec<PathBuf>,
+}
+
+impl AppBuilder {
+    /// Add a font from raw bytes. The font's family name (embedded in the font
+    /// file) becomes available as `FontFamily::Name("...")`.
+    pub fn font(mut self, data: Vec<u8>) -> Self {
+        self.fonts.push(data);
+        self
+    }
+
+    /// Add a font from a file path.
+    pub fn font_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.font_files.push(path.into());
+        self
+    }
+
+    pub fn run(self) {
         let (opener, queue) = WindowOpener::new();
+        let pending_close = Arc::new(Mutex::new(Vec::<WindowId>::new()));
         let initial = WindowRequest {
-            build_view: Box::new(build_view),
-            title: title.into(),
-            width,
-            height,
-            theme,
+            build_view: self.build_view,
+            title: self.title,
+            width: self.width,
+            height: self.height,
+            theme: self.theme,
         };
         let event_loop = EventLoop::new().expect("event loop");
         let mut app = App {
@@ -169,10 +238,56 @@ impl App {
             windows: HashMap::new(),
             opener,
             queue,
+            pending_close,
             initial: Some(initial),
             last_tick: None,
+            pending_fonts: self.fonts,
+            pending_font_files: self.font_files,
         };
         event_loop.run_app(&mut app).expect("event loop run");
+    }
+}
+
+impl App {
+    /// Quick-start: single window, no font customization.
+    pub fn run(
+        build_view: impl Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send + 'static,
+        theme: Theme,
+        title: impl Into<String>,
+        width: f64,
+        height: f64,
+    ) {
+        App::builder(build_view, theme, title, width, height).run();
+    }
+
+    /// Returns a builder for registering custom fonts before the event loop starts.
+    pub fn builder(
+        build_view: impl Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send + 'static,
+        theme: Theme,
+        title: impl Into<String>,
+        width: f64,
+        height: f64,
+    ) -> AppBuilder {
+        AppBuilder {
+            build_view: Box::new(build_view),
+            theme,
+            title: title.into(),
+            width,
+            height,
+            fonts: Vec::new(),
+            font_files: Vec::new(),
+        }
+    }
+
+    fn apply_pending_fonts(&self, renderer: &mut Renderer) {
+        for data in &self.pending_fonts {
+            renderer.load_font(data.clone());
+        }
+        for path in &self.pending_font_files {
+            if let Err(e) = renderer.load_font_file(path) {
+                eprintln!("glyph: failed to load font {:?}: {}", path, e);
+            }
+        }
     }
 
     fn open_window(&mut self, req: WindowRequest, event_loop: &ActiveEventLoop) {
@@ -193,14 +308,18 @@ impl App {
         let size = window.inner_size();
         let (surface, surface_cfg) =
             ctx.create_surface(Arc::clone(&window), size.width.max(1), size.height.max(1));
-        let renderer = Renderer::new(Arc::clone(&ctx), surface, surface_cfg);
+        let mut renderer = Renderer::new(Arc::clone(&ctx), surface, surface_cfg);
+        self.apply_pending_fonts(&mut renderer);
         let id = window.id();
+        let closer = WindowCloser::new(Arc::clone(&self.pending_close));
+        closer.set_id(id);
         self.windows.insert(
             id,
             WindowState {
                 window,
                 renderer,
                 build_view: req.build_view,
+                closer,
                 theme: req.theme,
                 cursor_pos: (0.0, 0.0),
                 frame: 0,
@@ -210,9 +329,11 @@ impl App {
                 scroll_vy: 0.0,
                 last_scroll: None,
                 flat_cache: Vec::new(),
-                scroll_only: false,
+                scaled_cache: Vec::new(),
                 modifiers: ModifiersState::empty(),
                 text_edit: TextEditState::default(),
+                scroll_dirty: false,
+                vlist_ranges: Vec::new(),
             },
         );
     }
@@ -240,14 +361,18 @@ impl ApplicationHandler for App {
             let size = window.inner_size();
             let (surface, surface_cfg) =
                 ctx.create_surface(Arc::clone(&window), size.width.max(1), size.height.max(1));
-            let renderer = Renderer::new(ctx, surface, surface_cfg);
+            let mut renderer = Renderer::new(ctx, surface, surface_cfg);
+            self.apply_pending_fonts(&mut renderer);
             let id = window.id();
+            let closer = WindowCloser::new(Arc::clone(&self.pending_close));
+            closer.set_id(id);
             self.windows.insert(
                 id,
                 WindowState {
                     window,
                     renderer,
                     build_view: req.build_view,
+                    closer,
                     theme: req.theme,
                     cursor_pos: (0.0, 0.0),
                     frame: 0,
@@ -257,9 +382,11 @@ impl ApplicationHandler for App {
                     scroll_vy: 0.0,
                     last_scroll: None,
                     flat_cache: Vec::new(),
-                    scroll_only: false,
+                    scaled_cache: Vec::new(),
                     modifiers: ModifiersState::empty(),
                     text_edit: TextEditState::default(),
+                    scroll_dirty: false,
+                    vlist_ranges: Vec::new(),
                 },
             );
         }
@@ -287,13 +414,17 @@ impl ApplicationHandler for App {
             if speed > 1.0 {
                 any_scrolling = true;
                 let (cur_x, cur_y) = ws.cursor_pos;
+                let only_scroll = !needs_redraw();
                 let dx = ws.scroll_vx * dt;
                 let dy = ws.scroll_vy * dt;
                 apply_scroll(&ws.scroll_items, cur_x, cur_y, dx, dy);
                 let decay = (-dt / 0.35).exp();
                 ws.scroll_vx *= decay;
                 ws.scroll_vy *= decay;
-                ws.scroll_only = true;
+                clear_redraw();
+                if only_scroll {
+                    ws.scroll_dirty = true;
+                }
                 ws.window.request_redraw();
             } else {
                 ws.scroll_vx = 0.0;
@@ -321,6 +452,13 @@ impl ApplicationHandler for App {
         for req in pending {
             self.open_window(req, event_loop);
         }
+
+        // Process window-close requests from WindowCloser::close().
+        let to_close: Vec<WindowId> = self.pending_close.lock().unwrap().drain(..).collect();
+        for id in to_close {
+            self.windows.remove(&id);
+        }
+
         if self.windows.is_empty() && self.ctx.is_some() {
             event_loop.exit();
         }
@@ -380,13 +518,29 @@ impl ApplicationHandler for App {
                 ws.window.set_cursor(Cursor::Icon(icon));
 
                 if needs_rebuild {
-                    let (w, h) = (ws.lw(), ws.lh());
-                    let view = ws.build(&opener);
-                    let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
+                    // Use flat_cache to fire hover callbacks without a full ViewTree rebuild.
+                    // flat_cache positions are content-space; subtract current scroll offsets.
                     let mut changed = false;
-                    for fv in &flat {
-                        let l = fv.layout.location.x;
-                        let t = fv.layout.location.y;
+                    let mut scroll_stack: Vec<(f32, f32)> = Vec::new();
+                    let mut pending_scroll: Option<(f32, f32)> = None;
+                    for fv in &ws.flat_cache {
+                        match &fv.kind {
+                            FlatViewKind::ScrollRegion { offset_x, offset_y, .. } => {
+                                pending_scroll = Some((offset_x.get(), offset_y.get()));
+                                continue;
+                            }
+                            FlatViewKind::ClipStart { .. } => {
+                                scroll_stack.push(pending_scroll.take().unwrap_or((0.0, 0.0)));
+                                continue;
+                            }
+                            FlatViewKind::ClipEnd => { scroll_stack.pop(); continue; }
+                            FlatViewKind::OpacityStart { .. } | FlatViewKind::OpacityEnd => continue,
+                            _ => {}
+                        }
+                        let sox: f32 = scroll_stack.iter().map(|(ox, _)| ox).sum();
+                        let soy: f32 = scroll_stack.iter().map(|(_, oy)| oy).sum();
+                        let l = fv.layout.location.x - sox;
+                        let t = fv.layout.location.y - soy;
                         let hit = px >= l
                             && px <= l + fv.layout.size.width
                             && py >= t
@@ -400,6 +554,9 @@ impl ApplicationHandler for App {
                             changed = true;
                         }
                     }
+                    // Clear the redraw flag set by hover signals so scroll frames
+                    // can still use the fast path after hover processing.
+                    clear_redraw();
                     if changed {
                         ws.window.request_redraw();
                     }
@@ -416,11 +573,8 @@ impl ApplicationHandler for App {
                     .iter()
                     .any(|i| matches!(&i.kind, HitKind::Button(true)));
                 if has_hover_btns {
-                    let (w, h) = (ws.lw(), ws.lh());
-                    let view = ws.build(&opener);
-                    let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
                     let mut changed = false;
-                    for fv in &flat {
+                    for fv in &ws.flat_cache {
                         if let FlatViewKind::Button {
                             on_hover: Some(on_hover),
                             ..
@@ -430,6 +584,7 @@ impl ApplicationHandler for App {
                             changed = true;
                         }
                     }
+                    clear_redraw();
                     if changed {
                         ws.window.request_redraw();
                     }
@@ -447,14 +602,16 @@ impl ApplicationHandler for App {
                 let Some(ws) = self.windows.get_mut(&id) else {
                     return;
                 };
-                let scale = ws.scale();
                 let (cur_x, cur_y) = ws.cursor_pos;
+                // Only mark as a pure scroll frame (fast-path eligible) if no other
+                // signals changed before this event (e.g. tweens, button clicks).
+                let only_scroll = !needs_redraw();
                 match delta {
-                    // Trackpad: macOS delivers its own momentum phase as continued PixelDelta
-                    // events after the finger lifts. Apply directly — no extra momentum needed.
+                    // Trackpad: macOS delivers PixelDelta in logical points (not device pixels),
+                    // and includes its own momentum phase after finger lift. Apply directly.
                     MouseScrollDelta::PixelDelta(pos) => {
-                        let dx = pos.x as f32 / scale;
-                        let dy = pos.y as f32 / scale;
+                        let dx = pos.x as f32;
+                        let dy = pos.y as f32;
                         apply_scroll(&ws.scroll_items, cur_x, cur_y, dx, dy);
                         ws.scroll_vx = 0.0;
                         ws.scroll_vy = 0.0;
@@ -468,8 +625,13 @@ impl ApplicationHandler for App {
                         ws.scroll_vy = ws.scroll_vy * 0.8 + dy * 6.0;
                     }
                 }
+                // apply_scroll set needs_redraw; clear it since we'll redraw anyway.
+                // Only mark scroll_dirty if no other signals were dirty beforehand.
+                clear_redraw();
                 ws.last_scroll = Some(Instant::now());
-                ws.scroll_only = true;
+                if only_scroll {
+                    ws.scroll_dirty = true;
+                }
                 ws.window.request_redraw();
             }
 
@@ -484,14 +646,36 @@ impl ApplicationHandler for App {
                 let (cx, cy) = ws.cursor_pos;
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
+                // Stay in logical pixels. Layout positions are content-space; subtract
+                // the current scroll offset (tracked via scroll_stack) to get screen coords.
                 let flat = ViewTree::build(view, &ws.theme, w, h, &mut ws.renderer.measurer());
-                let flat = scale_flat(flat, ws.scale());
                 let pressed = state == ElementState::Pressed;
                 let mut clicked = false;
                 let mut hit_text_input = false;
+                let mut scroll_stack: Vec<(f32, f32)> = Vec::new();
+                let mut pending_scroll: Option<(f32, f32)> = None;
                 for (idx, fv) in flat.iter().enumerate() {
-                    let l = fv.layout.location.x;
-                    let t = fv.layout.location.y;
+                    // Track scroll regions so we can offset hit rects correctly.
+                    match &fv.kind {
+                        FlatViewKind::ScrollRegion { offset_x, offset_y, .. } => {
+                            pending_scroll = Some((offset_x.get(), offset_y.get()));
+                            continue;
+                        }
+                        FlatViewKind::ClipStart { .. } => {
+                            scroll_stack.push(pending_scroll.take().unwrap_or((0.0, 0.0)));
+                            continue;
+                        }
+                        FlatViewKind::ClipEnd => {
+                            scroll_stack.pop();
+                            continue;
+                        }
+                        FlatViewKind::OpacityStart { .. } | FlatViewKind::OpacityEnd => continue,
+                        _ => {}
+                    }
+                    let sox: f32 = scroll_stack.iter().map(|(ox, _)| ox).sum();
+                    let soy: f32 = scroll_stack.iter().map(|(_, oy)| oy).sum();
+                    let l = fv.layout.location.x - sox;
+                    let t = fv.layout.location.y - soy;
                     let hit = cx >= l
                         && cx <= l + fv.layout.size.width
                         && cy >= t
@@ -509,7 +693,6 @@ impl ApplicationHandler for App {
                                     clicked = true;
                                 }
                             } else if !pressed {
-                                // Released outside — still cancel the press state
                                 if let Some(op) = on_press {
                                     op(false);
                                 }
@@ -562,19 +745,18 @@ impl ApplicationHandler for App {
                             if hit {
                                 ws.frame = 0;
                                 let val = value.get();
-                                let line_height = font_size * ws.scale() * 1.4;
-                                let pad = 8.0 * ws.scale();
-                                let rel_y =
-                                    cy * ws.scale() - t - pad + scroll_y.get() * ws.scale();
+                                let line_height = font_size * 1.4;
+                                let pad = 8.0;
+                                let rel_y = cy - t - pad + scroll_y.get();
                                 let line_idx = (rel_y / line_height).floor().max(0.0) as usize;
                                 let lines: Vec<&str> = val.split('\n').collect();
                                 let line_idx = line_idx.min(lines.len().saturating_sub(1));
                                 let mut byte_offset: usize =
                                     lines[..line_idx].iter().map(|l| l.len() + 1).sum();
-                                let rel_x = (cx * ws.scale() - l - pad).max(0.0);
+                                let rel_x = (cx - l - pad).max(0.0);
                                 let line_cursor = ws.renderer.cursor_for_x(
                                     lines[line_idx],
-                                    font_size * ws.scale(),
+                                    *font_size,
                                     rel_x,
                                 );
                                 byte_offset += line_cursor;
@@ -986,66 +1168,22 @@ impl ApplicationHandler for App {
                 let cursor_visible = (ws.frame / 30) % 2 == 0;
                 let scale = ws.scale();
 
-                // Fast path: scroll only — re-render cached flat list with updated offsets.
-                if ws.scroll_only && !ws.flat_cache.is_empty() {
-                    ws.scroll_only = false;
-                    // Rebuild hit items with new offsets (cheap — no layout).
-                    {
-                        let mut scroll_stack: Vec<(f32, f32)> = Vec::new();
-                        let mut pending: Option<(f32, f32)> = None;
-                        let mut hit_items: Vec<HitItem> = Vec::new();
-                        for fv in &ws.flat_cache {
-                            match &fv.kind {
-                                FlatViewKind::ScrollRegion {
-                                    offset_x, offset_y, ..
-                                } => {
-                                    pending = Some((offset_x.get(), offset_y.get()));
-                                }
-                                FlatViewKind::ClipStart { .. } => {
-                                    scroll_stack.push(pending.take().unwrap_or((0.0, 0.0)));
-                                }
-                                FlatViewKind::ClipEnd => {
-                                    scroll_stack.pop();
-                                }
-                                _ => {
-                                    let sox: f32 = scroll_stack.iter().map(|(ox, _)| ox).sum();
-                                    let soy: f32 = scroll_stack.iter().map(|(_, oy)| oy).sum();
-                                    let x = fv.layout.location.x - sox;
-                                    let y = fv.layout.location.y - soy;
-                                    let w = fv.layout.size.width;
-                                    let h = fv.layout.size.height;
-                                    let item = match &fv.kind {
-                                        FlatViewKind::Button { on_hover, .. } => Some(HitItem {
-                                            x,
-                                            y,
-                                            w,
-                                            h,
-                                            kind: HitKind::Button(on_hover.is_some()),
-                                        }),
-                                        FlatViewKind::TextInput { .. }
-                                        | FlatViewKind::TextArea { .. } => Some(HitItem {
-                                            x,
-                                            y,
-                                            w,
-                                            h,
-                                            kind: HitKind::Text,
-                                        }),
-                                        _ => None,
-                                    };
-                                    if let Some(item) = item {
-                                        hit_items.push(item);
-                                    }
-                                }
-                            }
-                        }
-                        ws.hit_items = hit_items;
-                    }
-                    let flat = scale_flat(ws.flat_cache.clone(), scale);
-                    ws.renderer
-                        .render(&flat, cursor_visible, ws.theme.background);
+                // Fast path: on scroll-only frames, skip ViewTree::build entirely.
+                // The renderer reads scroll offsets from signals live, so scaled_cache
+                // is still correct. We must still do a full rebuild if:
+                //   - no cached layout yet
+                //   - a VirtualList's visible row range has changed (new rows need layout)
+                //   - any other signal changed (tweens, clicks, text input, etc.)
+                let skip_rebuild = ws.scroll_dirty && !ws.scaled_cache.is_empty() && {
+                    let new_ranges = vlist_ranges_from_flat(&ws.flat_cache);
+                    new_ranges == ws.vlist_ranges
+                };
+                ws.scroll_dirty = false;
+
+                if skip_rebuild {
+                    ws.renderer.render(&ws.scaled_cache, cursor_visible, ws.theme.background, scale);
                     return;
                 }
-                ws.scroll_only = false;
 
                 let (w, h) = (ws.lw(), ws.lh());
                 let view = ws.build(&opener);
@@ -1108,36 +1246,49 @@ impl ApplicationHandler for App {
                     }
                     ws.hit_items = hit_items;
                 }
-                ws.scroll_items = flat
-                    .iter()
-                    .filter_map(|fv| {
-                        let l = fv.layout;
-                        if let FlatViewKind::ScrollRegion {
-                            offset_x,
-                            offset_y,
-                            max_x,
-                            max_y,
-                        } = &fv.kind
-                        {
-                            Some(ScrollItem {
-                                x: l.location.x,
-                                y: l.location.y,
-                                w: l.size.width,
-                                h: l.size.height,
-                                offset_x: offset_x.clone(),
-                                offset_y: offset_y.clone(),
-                                max_x: *max_x,
-                                max_y: *max_y,
-                            })
-                        } else {
-                            None
+                // Build scroll_items. Store content-space positions and enclosing signal refs
+                // so apply_scroll can compute live screen-space hit rects even after the page scrolls.
+                ws.scroll_items = {
+                    let mut items = Vec::new();
+                    // Stack of (offset_x_signal, offset_y_signal) for enclosing scroll regions.
+                    let mut enclosing_stack: Vec<(Signal<f32>, Signal<f32>)> = Vec::new();
+                    let mut pending: Option<(Signal<f32>, Signal<f32>, f32, f32, core_glyph::TaffyLayout)> = None;
+                    for fv in &flat {
+                        match &fv.kind {
+                            FlatViewKind::ScrollRegion { offset_x, offset_y, max_x, max_y, .. } => {
+                                pending = Some((offset_x.clone(), offset_y.clone(), *max_x, *max_y, fv.layout));
+                            }
+                            FlatViewKind::ClipStart { .. } => {
+                                if let Some((offset_x, offset_y, max_x, max_y, l)) = pending.take() {
+                                    items.push(ScrollItem {
+                                        cx: l.location.x,
+                                        cy: l.location.y,
+                                        w: l.size.width,
+                                        h: l.size.height,
+                                        enclosing: enclosing_stack.clone(),
+                                        offset_x: offset_x.clone(),
+                                        offset_y: offset_y.clone(),
+                                        max_x,
+                                        max_y,
+                                    });
+                                    enclosing_stack.push((offset_x, offset_y));
+                                } else {
+                                    // Non-scroll clip (e.g. overflow:hidden container) — push dummy.
+                                    enclosing_stack.push((Signal::new(0.0), Signal::new(0.0)));
+                                }
+                            }
+                            FlatViewKind::ClipEnd => { enclosing_stack.pop(); }
+                            _ => {}
                         }
-                    })
-                    .collect();
+                    }
+                    items
+                };
+                ws.vlist_ranges = vlist_ranges_from_flat(&flat);
                 ws.flat_cache = flat.clone();
-                let flat = scale_flat(flat, scale);
+                ws.scaled_cache = scale_flat(flat, scale);
+                clear_redraw();
                 ws.renderer
-                    .render(&flat, cursor_visible, ws.theme.background);
+                    .render(&ws.scaled_cache, cursor_visible, ws.theme.background, scale);
             }
 
             _ => {}
@@ -1257,6 +1408,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     weight,
                     align,
                     wrap,
+                    family,
                 } => FlatViewKind::Text {
                     content,
                     font_size: font_size * scale,
@@ -1264,6 +1416,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     weight,
                     align,
                     wrap,
+                    family,
                 },
                 FlatViewKind::Button {
                     label,
@@ -1277,6 +1430,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     corner_radius,
                     font_size,
                     wrap,
+                    family,
                 } => FlatViewKind::Button {
                     label,
                     on_click,
@@ -1289,11 +1443,13 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     corner_radius: corner_radius * scale,
                     font_size: font_size * scale,
                     wrap,
+                    family,
                 },
                 FlatViewKind::TextInput {
                     value,
                     focused,
                     cursor,
+                    scroll_x,
                     placeholder,
                     font_size,
                     bg_color,
@@ -1308,6 +1464,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     value,
                     focused,
                     cursor,
+                    scroll_x,
                     placeholder,
                     font_size: font_size * scale,
                     bg_color,
@@ -1345,11 +1502,13 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     y,
                     width,
                     height,
+                    is_virtual_list,
                 } => FlatViewKind::ClipStart {
                     x: x * scale,
                     y: y * scale,
                     width: width * scale,
                     height: height * scale,
+                    is_virtual_list,
                 },
                 FlatViewKind::Image {
                     path,
@@ -1393,15 +1552,38 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     offset_y,
                     max_x,
                     max_y,
+                    is_virtual_list,
                 } => FlatViewKind::ScrollRegion {
                     offset_x,
                     offset_y,
                     max_x,
                     max_y,
+                    is_virtual_list,
                 },
                 other => other,
             };
             FlatView { kind, layout }
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// VirtualList range tracking: compute (offset_y, first_row, last_row) for each
+// ScrollRegion that precedes a VirtualList clip so we can detect when the visible
+// set of rows changes and a full rebuild is needed.
+// ---------------------------------------------------------------------------
+
+/// Snapshot the VirtualList offset values at the time of the last full rebuild.
+/// Stored in `ws.vlist_ranges` after each rebuild. On the next frame, the live
+/// signal values are read again and compared — if any changed, skip_rebuild is false.
+fn vlist_ranges_from_flat(flat: &[FlatView]) -> Vec<f32> {
+    flat.iter()
+        .filter_map(|fv| {
+            if let FlatViewKind::ScrollRegion { offset_y, is_virtual_list: true, .. } = &fv.kind {
+                Some(offset_y.get())
+            } else {
+                None
+            }
         })
         .collect()
 }
@@ -1412,22 +1594,22 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
 
 fn apply_scroll(items: &[ScrollItem], cx: f32, cy: f32, dx: f32, dy: f32) {
     // Iterate in reverse so the last-emitted (innermost/deepest) container is
-    // checked first. Stop as soon as a container absorbs the scroll delta.
+    // checked first. The innermost container whose bounds contain the cursor
+    // absorbs the event unconditionally — no bubbling to outer containers.
     for item in items.iter().rev() {
-        if cx >= item.x && cx <= item.x + item.w && cy >= item.y && cy <= item.y + item.h {
+        // Compute live screen-space position by subtracting current enclosing offsets.
+        let sox: f32 = item.enclosing.iter().map(|(ox, _)| ox.get()).sum();
+        let soy: f32 = item.enclosing.iter().map(|(_, oy)| oy.get()).sum();
+        let sx = item.cx - sox;
+        let sy = item.cy - soy;
+        if cx >= sx && cx <= sx + item.w && cy >= sy && cy <= sy + item.h {
             let cur_x = item.offset_x.get();
             let cur_y = item.offset_y.get();
             let nx = (cur_x - dx).clamp(0.0, item.max_x);
             let ny = (cur_y - dy).clamp(0.0, item.max_y);
-            // Only consume the event if this container can actually scroll in
-            // the requested direction — otherwise fall through to the outer one.
-            let consumed_x = dx.abs() > 0.1 && (nx != cur_x);
-            let consumed_y = dy.abs() > 0.1 && (ny != cur_y);
-            if consumed_x || consumed_y {
-                item.offset_x.set(nx);
-                item.offset_y.set(ny);
-                return;
-            }
+            item.offset_x.set(nx);
+            item.offset_y.set(ny);
+            return;
         }
     }
 }
@@ -1461,6 +1643,7 @@ fn dispatch_scroll(
                     y,
                     width,
                     height,
+                    ..
                 } = &fv.kind
                 {
                     if cx >= *x && cx <= x + width && cy >= *y && cy <= y + height {
@@ -1533,6 +1716,7 @@ fn dispatch_scroll(
                     y,
                     width,
                     height,
+                    ..
                 } = &fv.kind
                 {
                     if cx >= *x && cx <= x + width && cy >= *y && cy <= y + height {
@@ -1597,6 +1781,158 @@ mod tests {
         assert!(!delete_selection(&mut value, &mut cursor, Some((1, 2))));
         assert_eq!(value, "éx");
         assert_eq!(cursor, 3);
+    }
+
+    #[test]
+    fn delete_selection_noop_when_none() {
+        let mut value = "hello".to_string();
+        let mut cursor = 3;
+        assert!(!delete_selection(&mut value, &mut cursor, None));
+        assert_eq!(value, "hello");
+        assert_eq!(cursor, 3);
+    }
+
+    // --- normalized_selection ---
+
+    #[test]
+    fn normalized_selection_returns_none_when_equal() {
+        assert_eq!(normalized_selection(3, 3), None);
+    }
+
+    #[test]
+    fn normalized_selection_orders_low_high() {
+        assert_eq!(normalized_selection(5, 2), Some((2, 5)));
+        assert_eq!(normalized_selection(2, 5), Some((2, 5)));
+    }
+
+    // --- update_selection_for_move ---
+
+    #[test]
+    fn update_selection_extend_creates_selection() {
+        let mut edit = TextEditState::default();
+        update_selection_for_move(&mut edit, 0, 3, true);
+        assert_eq!(edit.selection_anchor, Some(0));
+        assert_eq!(edit.selection, Some((0, 3)));
+    }
+
+    #[test]
+    fn update_selection_no_extend_clears_selection() {
+        let mut edit = TextEditState {
+            selection: Some((1, 4)),
+            selection_anchor: Some(1),
+            ..Default::default()
+        };
+        update_selection_for_move(&mut edit, 4, 5, false);
+        assert_eq!(edit.selection, None);
+        assert_eq!(edit.selection_anchor, None);
+    }
+
+    #[test]
+    fn update_selection_extend_preserves_anchor() {
+        let mut edit = TextEditState {
+            selection_anchor: Some(2),
+            ..Default::default()
+        };
+        update_selection_for_move(&mut edit, 4, 6, true);
+        assert_eq!(edit.selection_anchor, Some(2));
+        assert_eq!(edit.selection, Some((2, 6)));
+    }
+
+    // --- scale_flat ---
+
+    fn rect_flat(x: f32, y: f32, w: f32, h: f32, corner_radius: f32) -> FlatView {
+        use core_glyph::FlatView;
+        let mut layout = core_glyph::TaffyLayout::default();
+        layout.location.x = x;
+        layout.location.y = y;
+        layout.size.width = w;
+        layout.size.height = h;
+        FlatView {
+            kind: FlatViewKind::Rect { color: core_glyph::Color::WHITE, corner_radius },
+            layout,
+        }
+    }
+
+    #[test]
+    fn scale_flat_scales_position_and_size() {
+        let flat = vec![rect_flat(10.0, 20.0, 100.0, 50.0, 4.0)];
+        let scaled = scale_flat(flat, 2.0);
+        assert_eq!(scaled[0].layout.location.x, 20.0);
+        assert_eq!(scaled[0].layout.location.y, 40.0);
+        assert_eq!(scaled[0].layout.size.width, 200.0);
+        assert_eq!(scaled[0].layout.size.height, 100.0);
+    }
+
+    #[test]
+    fn scale_flat_scales_corner_radius() {
+        let flat = vec![rect_flat(0.0, 0.0, 50.0, 50.0, 8.0)];
+        let scaled = scale_flat(flat, 2.0);
+        assert!(matches!(scaled[0].kind, FlatViewKind::Rect { corner_radius, .. } if corner_radius == 16.0));
+    }
+
+    #[test]
+    fn scale_flat_identity_at_1x() {
+        let flat = vec![rect_flat(5.0, 10.0, 80.0, 40.0, 2.0)];
+        let scaled = scale_flat(flat, 1.0);
+        assert_eq!(scaled[0].layout.location.x, 5.0);
+        assert_eq!(scaled[0].layout.size.width, 80.0);
+    }
+
+    // --- apply_scroll ---
+
+    fn scroll_item(x: f32, y: f32, w: f32, h: f32, max_y: f32) -> ScrollItem {
+        ScrollItem {
+            cx: x, cy: y, w, h,
+            offset_x: core_glyph::Signal::new(0.0f32),
+            offset_y: core_glyph::Signal::new(0.0f32),
+            max_x: 0.0,
+            max_y,
+            enclosing: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn apply_scroll_updates_offset_when_cursor_inside() {
+        let item = scroll_item(0.0, 0.0, 400.0, 300.0, 500.0);
+        let items = vec![item];
+        apply_scroll(&items, 200.0, 150.0, 0.0, -20.0);
+        assert_eq!(items[0].offset_y.get(), 20.0);
+    }
+
+    #[test]
+    fn apply_scroll_clamps_to_max() {
+        let item = scroll_item(0.0, 0.0, 400.0, 300.0, 100.0);
+        let items = vec![item];
+        apply_scroll(&items, 200.0, 150.0, 0.0, -9999.0);
+        assert_eq!(items[0].offset_y.get(), 100.0);
+    }
+
+    #[test]
+    fn apply_scroll_clamps_to_zero() {
+        let item = scroll_item(0.0, 0.0, 400.0, 300.0, 100.0);
+        item.offset_y.set(50.0);
+        let items = vec![item];
+        apply_scroll(&items, 200.0, 150.0, 0.0, 9999.0);
+        assert_eq!(items[0].offset_y.get(), 0.0);
+    }
+
+    #[test]
+    fn apply_scroll_ignores_cursor_outside_bounds() {
+        let item = scroll_item(0.0, 0.0, 400.0, 300.0, 500.0);
+        let items = vec![item];
+        apply_scroll(&items, 500.0, 150.0, 0.0, -20.0); // cursor outside
+        assert_eq!(items[0].offset_y.get(), 0.0);
+    }
+
+    #[test]
+    fn apply_scroll_innermost_container_wins() {
+        let outer = scroll_item(0.0, 0.0, 400.0, 300.0, 500.0);
+        let inner = scroll_item(50.0, 50.0, 200.0, 150.0, 500.0);
+        // inner is pushed last so it's "innermost" in reverse iteration
+        let items = vec![outer, inner];
+        apply_scroll(&items, 100.0, 100.0, 0.0, -20.0);
+        assert_eq!(items[1].offset_y.get(), 20.0); // inner absorbed
+        assert_eq!(items[0].offset_y.get(), 0.0);  // outer untouched
     }
 }
 
@@ -1871,7 +2207,7 @@ impl ApplicationHandler for HotApp {
                     let flat = scale_flat(flat, scale);
                     state
                         .renderer
-                        .render(flat, cursor_visible, self.theme.background);
+                        .render(&flat, cursor_visible, self.theme.background, scale);
                 }
             }
 

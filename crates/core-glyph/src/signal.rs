@@ -47,3 +47,47 @@ impl<T: Clone> Signal<T> {
         Arc::into_raw(Arc::clone(&self.value))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_returns_initial_value() {
+        let s = Signal::new(42i32);
+        assert_eq!(s.get(), 42);
+    }
+
+    #[test]
+    fn set_updates_value() {
+        let s = Signal::new(0i32);
+        s.set(99);
+        assert_eq!(s.get(), 99);
+    }
+
+    #[test]
+    fn set_marks_redraw() {
+        clear_redraw();
+        let s = Signal::new(false);
+        assert!(!needs_redraw());
+        s.set(true);
+        assert!(needs_redraw());
+        clear_redraw();
+    }
+
+    #[test]
+    fn clone_shares_value() {
+        let a = Signal::new(1i32);
+        let b = a.clone();
+        a.set(7);
+        assert_eq!(b.get(), 7);
+    }
+
+    #[test]
+    fn independent_signals_do_not_share_value() {
+        let a = Signal::new(1i32);
+        let b = Signal::new(1i32);
+        a.set(99);
+        assert_eq!(b.get(), 1);
+    }
+}

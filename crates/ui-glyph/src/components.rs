@@ -3,7 +3,7 @@ use crate::layout::{divider, divider_dark};
 use crate::shadows::{shadow_dark_md, shadow_md, shadow_sm};
 use crate::spacing::*;
 use core_glyph::{
-    button, column, flexible, image, rect, row, spacer, text, AlignItems, Color, FontWeight,
+    button, column, flex, flexible, image, rect, row, spacer, text, AlignItems, Color, FontWeight,
     JustifyContent, Shadow, View,
 };
 
@@ -101,6 +101,23 @@ pub fn card_section(header: View, body: Vec<View>) -> View {
     .border(light::BORDER, 1.0)
     .radius(RADIUS_XL)
     .shadow(shadow_sm())
+    .into()
+}
+
+pub fn card_section_dark(header: View, body: Vec<View>) -> View {
+    column(vec![
+        column(vec![header])
+            .padding_x(SPACE_4)
+            .padding_y(SPACE_3)
+            .into(),
+        divider_dark(),
+        column(body).gap(SPACE_3).padding(SPACE_4).into(),
+    ])
+    .gap(0.0)
+    .bg(dark::SURFACE)
+    .border(dark::BORDER, 1.0)
+    .radius(RADIUS_XL)
+    .shadow(shadow_dark_md())
     .into()
 }
 
@@ -405,26 +422,32 @@ pub fn stat_card_with_change(
     change: impl Into<String>,
     positive: bool,
 ) -> View {
-    let change_color = if positive {
-        light::SUCCESS
-    } else {
-        light::DANGER
-    };
+    let change_color = if positive { light::SUCCESS } else { light::DANGER };
     card(vec![
-        text(label, TEXT_XS)
-            .weight(FontWeight::Bold)
-            .color(light::TEXT_MUTED)
-            .into(),
+        text(label, TEXT_XS).weight(FontWeight::Bold).color(light::TEXT_MUTED).into(),
         row(vec![
-            text(value, TEXT_3XL)
-                .weight(FontWeight::Bold)
-                .color(light::TEXT)
-                .into(),
+            text(value, TEXT_3XL).weight(FontWeight::Bold).color(light::TEXT).into(),
             spacer(),
-            text(change, TEXT_SM)
-                .weight(FontWeight::Bold)
-                .color(change_color)
-                .into(),
+            text(change, TEXT_SM).weight(FontWeight::Bold).color(change_color).into(),
+        ])
+        .fill_width()
+        .into(),
+    ])
+}
+
+pub fn stat_card_with_change_dark(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    change: impl Into<String>,
+    positive: bool,
+) -> View {
+    let change_color = if positive { dark::SUCCESS } else { dark::DANGER };
+    card_dark(vec![
+        text(label, TEXT_XS).weight(FontWeight::Bold).color(dark::TEXT_MUTED).into(),
+        row(vec![
+            text(value, TEXT_3XL).weight(FontWeight::Bold).color(dark::TEXT).into(),
+            spacer(),
+            text(change, TEXT_SM).weight(FontWeight::Bold).color(change_color).into(),
         ])
         .fill_width()
         .into(),
@@ -445,16 +468,18 @@ pub fn progress(value: f32, max: f32, color: Color) -> View {
 
 pub fn progress_bar(pct: f32, fg: Color, bg: Color, height: f32) -> View {
     let pct = pct.clamp(0.0, 1.0);
-    row(vec![rect(fg)
-        .width(pct * 200.0)
+    let fill = flex(rect(fg).height(height).radius(height / 2.0).fill_width(), pct);
+    let children = if pct < 1.0 {
+        vec![fill, flex(rect(Color::TRANSPARENT).height(height).fill_width(), 1.0 - pct)]
+    } else {
+        vec![fill]
+    };
+    row(children)
+        .fill_width()
         .height(height)
+        .bg(bg)
         .radius(height / 2.0)
-        .into()])
-    .width(200.0)
-    .height(height)
-    .bg(bg)
-    .radius(height / 2.0)
-    .into()
+        .into()
 }
 
 // Dividers with labels
@@ -704,6 +729,19 @@ pub fn kbd(key: impl Into<String>) -> View {
     .into()
 }
 
+pub fn kbd_dark(key: impl Into<String>) -> View {
+    row(vec![text(key, TEXT_XS)
+        .weight(FontWeight::Bold)
+        .color(dark::TEXT_MUTED)
+        .into()])
+    .padding_x(SPACE_1)
+    .padding_y(1.0)
+    .bg(dark::SURFACE_2)
+    .border(dark::BORDER_STRONG, 1.0)
+    .radius(RADIUS_MD)
+    .into()
+}
+
 // Number / count bubble
 pub fn count_bubble(n: u32, color: Color) -> View {
     let label = if n > 99 {
@@ -849,6 +887,46 @@ pub fn tab_bar(tabs: Vec<(&str, bool)>, on_select: impl Fn(usize) + 'static + Cl
         .gap(SPACE_1)
         .padding(SPACE_1)
         .bg(light::SURFACE_2)
+        .radius(RADIUS_XL)
+        .into()
+}
+
+pub fn tab_bar_dark(tabs: Vec<(&str, bool)>, on_select: impl Fn(usize) + 'static + Clone) -> View {
+    let items: Vec<View> = tabs
+        .into_iter()
+        .enumerate()
+        .map(|(i, (label, active))| {
+            let on_select = on_select.clone();
+            let bg = if active {
+                dark::ACCENT
+            } else {
+                Color::TRANSPARENT
+            };
+            let fg = if active {
+                Color::WHITE
+            } else {
+                dark::TEXT_MUTED
+            };
+            let hover = if active {
+                dark::ACCENT
+            } else {
+                dark::SURFACE_2
+            };
+            button(label, move || on_select(i))
+                .bg(bg)
+                .hover_bg(hover)
+                .text_color(fg)
+                .radius(RADIUS_LG)
+                .height(BTN_HEIGHT_SM)
+                .padding(SPACE_3)
+                .font_size(TEXT_SM)
+                .into()
+        })
+        .collect();
+    row(items)
+        .gap(SPACE_1)
+        .padding(SPACE_1)
+        .bg(dark::SURFACE_2)
         .radius(RADIUS_XL)
         .into()
 }

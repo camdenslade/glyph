@@ -144,7 +144,7 @@ macro_rules! glyph_guest {
                 match view {
                     View::Spacer => alloc_node(CViewTag::Spacer, ::std::ptr::null_mut()),
 
-                    View::Rect { color, style } => {
+                    View::Rect { color, style, .. } => {
                         let d = Box::new(CRectData {
                             color: to_ccolor(color),
                             width: match style.size.width {
@@ -167,6 +167,7 @@ macro_rules! glyph_guest {
                         align,
                         wrap,
                         style,
+                        ..
                     } => {
                         let d = Box::new(CTextData {
                             content: alloc_str(&content),
@@ -488,6 +489,7 @@ macro_rules! glyph_guest {
                         corner_radius,
                         on_submit,
                         style,
+                        ..
                     } => {
                         extern "C" fn call_submit(data: *mut c_void, val: *const c_char) {
                             let s = unsafe { CStr::from_ptr(val) }
@@ -555,6 +557,7 @@ macro_rules! glyph_guest {
                         offset_x,
                         offset_y,
                         style,
+                        ..
                     } => {
                         let child_ptr = serialize_view(*child, table);
                         let w = match style.size.width {
@@ -593,13 +596,14 @@ macro_rules! glyph_guest {
 
                     View::Component(c) => {
                         // Expand inline — components are transparent at the ABI boundary.
-                        // We need a theme to expand; use a dummy light theme since we
-                        // can't reach the real one here. Components should not be
-                        // returned from top-level render in guest code.
                         let theme = Theme::light();
                         let rendered = c.render(&theme);
                         serialize_view(rendered, table)
                     }
+
+                    // VirtualList, TextArea, and Opacity are not supported over the hot-reload
+                    // ABI — serialize as a spacer so the host doesn't crash.
+                    _ => alloc_node(CViewTag::Spacer, ::std::ptr::null_mut()),
                 }
             }
 

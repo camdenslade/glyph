@@ -438,7 +438,7 @@ impl DashboardScreen {
             error: Signal::new(None),
             scroll_y: Signal::new(0.0),
             scroll_x: Signal::new(0.0),
-            max_scroll: Signal::new((0.0, 0.0)),
+            max_scroll: Signal::new((-1.0, -1.0)),
         };
         s.refresh();
         s
@@ -1786,7 +1786,7 @@ impl GlyphGitHub {
 fn main() {
     let app = GlyphGitHub::new();
     App::run(
-        move |_opener| {
+        move |_opener, _closer| {
             let theme = gh_theme();
             let view = app.render();
             (theme, view)

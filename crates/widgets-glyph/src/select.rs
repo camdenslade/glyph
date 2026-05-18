@@ -70,11 +70,10 @@ impl Component for Select {
 
         column(items)
             .gap(1.0)
-            .auto_size()
+            .width(self.width)
             .bg(theme.surface)
             .border(theme.border, 1.0)
             .radius(theme.radius)
-            .clip()
             .into()
     }
 }

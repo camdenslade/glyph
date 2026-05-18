@@ -1,6 +1,6 @@
 use crate::signal::Signal;
 use crate::theme::Theme;
-use crate::view::{Color, FontWeight, Shadow, TextAlign, View};
+use crate::view::{Color, FontFamily, FontWeight, Shadow, TextAlign, View};
 use std::sync::Arc;
 use taffy::{Layout, NodeId, Size, TaffyTree};
 
@@ -37,6 +37,7 @@ pub enum FlatViewKind {
         weight: FontWeight,
         align: TextAlign,
         wrap: bool,
+        family: FontFamily,
     },
     Button {
         label: String,
@@ -50,11 +51,13 @@ pub enum FlatViewKind {
         corner_radius: f32,
         font_size: f32,
         wrap: bool,
+        family: FontFamily,
     },
     TextInput {
         value: Signal<String>,
         focused: Signal<bool>,
         cursor: Signal<usize>,
+        scroll_x: Signal<f32>,
         selection: Option<(usize, usize)>,
         composing: Option<(usize, String)>,
         placeholder: String,
@@ -72,6 +75,9 @@ pub enum FlatViewKind {
         y: f32,
         width: f32,
         height: f32,
+        /// True for VirtualList clips — the vlist offset is already baked into row
+        /// positions via frac_offset, so the renderer must NOT subtract it again.
+        is_virtual_list: bool,
     },
     /// Scroll region metadata emitted just before a ClipStart for Scroll/VirtualList nodes.
     /// Carries the offset signals and content bounds so the platform can apply momentum
@@ -81,6 +87,9 @@ pub enum FlatViewKind {
         offset_y: Signal<f32>,
         max_x: f32,
         max_y: f32,
+        /// True when emitted by a VirtualList node — row content changes as offset changes,
+        /// so a full layout rebuild is needed when the visible row range shifts.
+        is_virtual_list: bool,
     },
     /// End the most recent scissor clip region.
     ClipEnd,
@@ -588,7 +597,13 @@ fn build_virtual_inner(
     let child_nodes: Vec<NodeId> = (first_row..last_row)
         .map(|i| {
             let row_view = build_row(i);
-            build_node(taffy, &row_view, measure)
+            let node = build_node(taffy, &row_view, measure);
+            // Force each row to exactly row_height so Taffy positions them
+            // predictably regardless of content size.
+            let mut style = taffy.style(node).expect("style").clone();
+            style.size.height = taffy::Dimension::Length(row_height);
+            taffy.set_style(node, style).expect("set style");
+            node
         })
         .collect();
     taffy
@@ -634,6 +649,7 @@ fn collect(
             weight,
             align,
             wrap,
+            family,
             ..
         } => {
             flat.push(FlatView {
@@ -644,6 +660,7 @@ fn collect(
                     weight,
                     align,
                     wrap,
+                    family,
                 },
                 layout: adjusted,
             });
@@ -660,6 +677,7 @@ fn collect(
             corner_radius,
             font_size,
             wrap,
+            family,
             ..
         } => {
             flat.push(FlatView {
@@ -675,6 +693,7 @@ fn collect(
                     corner_radius,
                     font_size,
                     wrap,
+                    family,
                 },
                 layout: adjusted,
             });
@@ -683,6 +702,7 @@ fn collect(
             value,
             focused,
             cursor,
+            scroll_x,
             placeholder,
             font_size,
             bg_color,
@@ -698,6 +718,7 @@ fn collect(
                     value,
                     focused,
                     cursor,
+                    scroll_x,
                     selection: None,
                     composing: None,
                     placeholder,
@@ -752,6 +773,7 @@ fn collect(
                         y,
                         width: adjusted.size.width,
                         height: adjusted.size.height,
+                        is_virtual_list: false,
                     },
                     layout: adjusted,
                 });
@@ -803,16 +825,12 @@ fn collect(
             let vw = adjusted.size.width;
             let vh = adjusted.size.height;
             let child_nodes = taffy.children(node).expect("children");
-            // TODO: scroll is still a little laggy. The root cause is that scroll offset
-            // is baked into flat list positions in collect(), so every scroll pixel requires
-            // a full build+layout pass. The fix is to move scroll translation into the
-            // renderer (pass offset to render, keep flat positions viewport-relative) so
-            // scroll frames skip layout entirely. The max_scroll cache below is a partial
-            // mitigation (avoids the second taffy pass after the first frame) but the main
-            // layout pass still runs every frame.
+            // max_scroll is initialised to (-1.0, -1.0) as a sentinel meaning "not yet
+            // measured". Any non-negative value (including 0.0) means the child has been
+            // laid out and there is that many logical pixels of overflow in each axis.
             let (max_x, max_y) = {
                 let cached = max_scroll.get();
-                if cached.0 > 0.0 || cached.1 > 0.0 {
+                if cached.0 >= 0.0 {
                     cached
                 } else {
                     taffy
@@ -840,6 +858,7 @@ fn collect(
                     offset_y: offset_y.clone(),
                     max_x,
                     max_y,
+                    is_virtual_list: false,
                 },
                 layout: adjusted,
             });
@@ -849,6 +868,7 @@ fn collect(
                     y,
                     width: vw,
                     height: vh,
+                    is_virtual_list: false,
                 },
                 layout: adjusted,
             });
@@ -934,6 +954,7 @@ fn collect(
                     offset_y: offset_y.clone(),
                     max_x: 0.0,
                     max_y,
+                    is_virtual_list: true,
                 },
                 layout: adjusted,
             });
@@ -943,6 +964,7 @@ fn collect(
                     y,
                     width: vw,
                     height: vh,
+                    is_virtual_list: true,
                 },
                 layout: adjusted,
             });

@@ -5,7 +5,7 @@
 
 mod app;
 
-pub use app::{App, WindowOpener};
+pub use app::{App, AppBuilder, WindowCloser, WindowOpener};
 #[cfg(feature = "hot-reload")]
 pub use app::HotApp;
 pub use core_glyph::Theme;

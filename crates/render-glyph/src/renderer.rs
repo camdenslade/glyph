@@ -4,7 +4,7 @@ use crate::pipeline::{
     ImagePipeline, ImageVertex, RectPipeline, RectVertex, ShadowPipeline, ShadowVertex,
     TextPipeline, TextVertex,
 };
-use core_glyph::{Color, FlatView, FlatViewKind, FontWeight, TextAlign};
+use core_glyph::{Color, FlatView, FlatViewKind, FontFamily, FontWeight, TextAlign};
 use text_glyph::{measure_text, GlyphAtlas, TextRenderer};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -98,6 +98,16 @@ impl Renderer {
         }
     }
 
+    /// Load a font from raw bytes. Available via `FontFamily::Name("...")` after loading.
+    pub fn load_font(&mut self, data: Vec<u8>) {
+        self.text_renderer.load_font(data);
+    }
+
+    /// Load a font from a file path. Available via `FontFamily::Name("...")` after loading.
+    pub fn load_font_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), String> {
+        self.text_renderer.load_font_file(path)
+    }
+
     /// Returns a closure suitable for passing to `ViewTree::build` as the measure function.
     pub fn measurer(&mut self) -> impl FnMut(&str, f32, f32) -> (f32, f32) + '_ {
         |text, font_size, max_width| {
@@ -160,10 +170,11 @@ impl Renderer {
             .update_screen(&self.ctx.queue, width as f32, height as f32);
     }
 
-    /// Draw a frame. `cursor_visible` controls whether text input cursors are
-    /// shown this frame — callers toggle it on a timer for blink effect.
-    /// `bg` is the window clear color (should be `theme.background`).
-    pub fn render(&mut self, views: &[FlatView], cursor_visible: bool, bg: Color) {
+    /// Draw a frame. `scale` is the device pixel ratio — used to convert logical
+    /// scroll offsets (stored in signals) to physical pixels matching the
+    /// already-scaled layout coordinates in `views`. `cursor_visible` toggles
+    /// text-input cursor blink. `bg` is the window clear color.
+    pub fn render(&mut self, views: &[FlatView], cursor_visible: bool, bg: Color, scale: f32) {
         let sw = self.surface_cfg.width as f32;
         let sh = self.surface_cfg.height as f32;
 
@@ -193,19 +204,32 @@ impl Renderer {
                     ref offset_y,
                     ..
                 } => {
-                    pending_scroll_offset = Some((offset_x.get(), offset_y.get()));
+                    pending_scroll_offset = Some((offset_x.get() * scale, offset_y.get() * scale));
                 }
                 FlatViewKind::ClipStart {
                     x,
                     y,
                     width,
                     height,
+                    is_virtual_list,
                 } => {
                     batches.push(current);
-                    let scissor = scissor_rect(x, y, width, height, sw, sh);
+                    // The ClipStart position is in content space (layout coords). Subtract the
+                    // cumulative scroll offset of all enclosing scroll regions to get screen space.
+                    let sox: f32 = scroll_offset_stack.iter().map(|(ox, _)| ox).sum();
+                    let soy: f32 = scroll_offset_stack.iter().map(|(_, oy)| oy).sum();
+                    let scissor = scissor_rect(x - sox, y - soy, width, height, sw, sh);
                     clip_stack.push(Some(scissor));
                     current = DrawBatch::new(Some(scissor), cursor_visible);
-                    scroll_offset_stack.push(pending_scroll_offset.take().unwrap_or((0.0, 0.0)));
+                    // For VirtualList clips the vlist scroll offset is already baked into
+                    // row positions via frac_offset — push (0,0) so the renderer doesn't
+                    // subtract it a second time. For regular Scroll, push the live offset.
+                    if is_virtual_list {
+                        scroll_offset_stack.push((0.0, 0.0));
+                        let _ = pending_scroll_offset.take();
+                    } else {
+                        scroll_offset_stack.push(pending_scroll_offset.take().unwrap_or((0.0, 0.0)));
+                    }
                 }
                 FlatViewKind::ClipEnd => {
                     batches.push(current);
@@ -243,7 +267,7 @@ impl Renderer {
                             text_color,
                             corner_radius,
                             font_size,
-                            wrap,
+                            family,
                             ..
                         } => {
                             let draw_bg =
@@ -258,16 +282,10 @@ impl Renderer {
                                 draw_bg,
                                 corner_radius,
                             );
-                            let measure_width = if wrap { fw } else { 4096.0 };
-                            let (tw, th) =
-                                self.text_renderer.measure(&label, font_size, measure_width);
-                            let text_y = t + (fh - th) * 0.5;
-                            let text_x = if wrap {
-                                l
-                            } else {
-                                l + (fw - tw).max(0.0) * 0.5
-                            };
-                            let max_width = if wrap { fw } else { tw.max(fw) };
+                            let text_y = t + (fh - font_size * 1.2) * 0.5;
+                            // Use TextAlign::Center with the full button width so cosmic-text
+                            // handles centering — don't manually offset text_x.
+                            let max_width = fw;
                             let quads = self.text_renderer.shape(
                                 &mut self.atlas,
                                 &self.ctx.queue,
@@ -276,9 +294,10 @@ impl Renderer {
                                 text_color,
                                 FontWeight::Regular,
                                 TextAlign::Center,
-                                text_x,
+                                l,
                                 text_y,
                                 max_width,
+                                &family,
                             );
                             self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
                                 &self.ctx.device,
@@ -296,6 +315,7 @@ impl Renderer {
                             weight,
                             align,
                             wrap,
+                            family,
                         } => {
                             let color = with_alpha(color, &opacity_stack);
                             let max_w = if wrap { fw } else { fw.max(sw) };
@@ -310,6 +330,7 @@ impl Renderer {
                                 l,
                                 t,
                                 max_w,
+                                &family,
                             );
                             self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
                                 &self.ctx.device,
@@ -324,6 +345,7 @@ impl Renderer {
                             value,
                             focused,
                             cursor,
+                            scroll_x,
                             selection,
                             composing,
                             placeholder,
@@ -386,8 +408,37 @@ impl Renderer {
                             );
 
                             let pad = 8.0;
-                            let text_x = l + pad;
+                            let inner_w = fw - pad * 2.0;
                             let text_y = t + (fh - font_size) / 2.0;
+
+                            // Keep cursor visible: measure prefix width and adjust scroll_x.
+                            if is_focused {
+                                let cur = cursor.get().min(val.len());
+                                let prefix = &val[..cur];
+                                let (cur_x, _) = if prefix.is_empty() {
+                                    (0.0_f32, 0.0_f32)
+                                } else {
+                                    self.text_renderer.measure(prefix, font_size, f32::MAX)
+                                };
+                                let ox = scroll_x.get();
+                                let new_ox = if cur_x - ox > inner_w {
+                                    cur_x - inner_w + 4.0
+                                } else if cur_x < ox {
+                                    (cur_x - 4.0).max(0.0)
+                                } else {
+                                    ox
+                                };
+                                if (new_ox - ox).abs() > 0.5 {
+                                    scroll_x.set(new_ox);
+                                }
+                            }
+                            let text_x = l + pad - scroll_x.get();
+
+                            // Scissor the text/cursor/selection content so it cannot
+                            // overflow the input box when the value is long.
+                            let ti_scissor = scissor_rect(l, t, fw, fh, sw, sh);
+                            batches.push(current);
+                            current = DrawBatch::new(Some(ti_scissor), cursor_visible);
 
                             let display_value = if let Some((start, composing_text)) = &composing {
                                 let start = (*start).min(val.len());
@@ -478,7 +529,8 @@ impl Renderer {
                                     TextAlign::Left,
                                     text_x,
                                     text_y,
-                                    fw - pad * 2.0,
+                                    f32::MAX,
+                                    &FontFamily::SansSerif,
                                 );
                                 self.atlas_bind_group = self.text_pipeline.make_atlas_bind_group(
                                     &self.ctx.device,
@@ -522,6 +574,10 @@ impl Renderer {
                                     0.0,
                                 );
                             }
+
+                            // Restore the previous scissor/batch.
+                            batches.push(current);
+                            current = DrawBatch::new(*clip_stack.last().unwrap_or(&None), cursor_visible);
                         }
                         FlatViewKind::TextArea {
                             value,
@@ -590,8 +646,35 @@ impl Renderer {
                             );
 
                             let pad = 8.0;
+
+                            // Keep cursor line visible: adjust scroll_y so the cursor
+                            // line stays within [pad, fh - pad - line_height].
+                            if is_focused && !val.is_empty() {
+                                let cur = cursor.get().min(val.len());
+                                let newlines = val[..cur].chars().filter(|&c| c == '\n').count();
+                                let cursor_top = pad + newlines as f32 * line_height;
+                                let cursor_bot = cursor_top + line_height;
+                                let visible_h = fh - pad * 2.0;
+                                let new_oy = if cursor_bot - oy > visible_h {
+                                    cursor_bot - visible_h
+                                } else if cursor_top < oy {
+                                    cursor_top
+                                } else {
+                                    oy
+                                };
+                                if (new_oy - oy).abs() > 0.5 {
+                                    scroll_y.set(new_oy);
+                                }
+                            }
+                            let oy = scroll_y.get();
+
                             let text_x = l + pad;
                             let base_y = t + pad - oy;
+
+                            // Scissor the content area so text/cursor can't bleed outside the box.
+                            let ta_scissor = scissor_rect(l, t, fw, fh, sw, sh);
+                            batches.push(current);
+                            current = DrawBatch::new(Some(ta_scissor), cursor_visible);
 
                             let (display, display_color) = if val.is_empty() {
                                 (
@@ -623,6 +706,7 @@ impl Renderer {
                                         text_x,
                                         ly,
                                         fw - pad * 2.0,
+                                        &FontFamily::SansSerif,
                                     );
                                     self.atlas_bind_group =
                                         self.text_pipeline.make_atlas_bind_group(
@@ -676,6 +760,10 @@ impl Renderer {
                                     0.0,
                                 );
                             }
+
+                            // Restore the previous scissor/batch.
+                            batches.push(current);
+                            current = DrawBatch::new(*clip_stack.last().unwrap_or(&None), cursor_visible);
                         }
                         FlatViewKind::ContainerRect {
                             bg_color,

@@ -26,7 +26,26 @@ impl ImageCache {
 
     fn resolve(&self, path: &str) -> PathBuf {
         let p = Path::new(path);
-        if p.is_absolute() { p.to_path_buf() } else { self.asset_dir.join(p) }
+        if p.is_absolute() {
+            return p.to_path_buf();
+        }
+        // Try exe-relative first, then cwd-relative, then src-relative.
+        let exe_rel = self.asset_dir.join(p);
+        if exe_rel.exists() {
+            return exe_rel;
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            let cwd_rel = cwd.join(p);
+            if cwd_rel.exists() {
+                return cwd_rel;
+            }
+            // Also try crates/demo-glyph/src/ for development assets
+            let src_rel = cwd.join("crates/demo-glyph/src").join(p);
+            if src_rel.exists() {
+                return src_rel;
+            }
+        }
+        exe_rel
     }
 
     /// Upload the image at `path` to the GPU if not already cached.

@@ -31,10 +31,10 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build
-        run: cargo build --workspace --exclude glyph-github
+        run: cargo build --workspace --exclude github-glyph
 
       - name: Test
-        run: cargo test --workspace --exclude glyph-github
+        run: cargo test --workspace --exclude github-glyph
 
       - name: Clippy
-        run: cargo clippy --workspace --exclude glyph-github -- -D warnings
+        run: cargo clippy --workspace --exclude github-glyph -- -D warnings

@@ -21,6 +21,7 @@ crate-type = ["cdylib", "rlib"]
 core-glyph     = { version = "0.1.0", path = "../core-glyph" }
 platform-glyph = { version = "0.1.0", path = "../platform-glyph" }
 widgets-glyph  = { version = "0.1.0", path = "../widgets-glyph" }
+ui-glyph       = { version = "0.1.0", path = "../ui-glyph" }
 hot-glyph      = { version = "0.1.0", path = "../hot-glyph", optional = true }
 taffy          = "0.5"
 

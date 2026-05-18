@@ -5,6 +5,7 @@ use taffy::Style;
 
 /// Linear RGBA color with components in [0, 1].
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Color {
     pub r: f32,
     pub g: f32,
@@ -87,6 +88,7 @@ impl Color {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Shadow {
     pub offset_x: f32,
     pub offset_y: f32,
@@ -116,14 +118,35 @@ impl Shadow {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Font family selector. `Name` loads a font previously registered via
+/// `App::load_font` / `Renderer::load_font`. Falls back to the system
+/// sans-serif if the name is not found.
+#[derive(Clone, Debug, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FontFamily {
+    /// The system default sans-serif (the default).
+    #[default]
+    SansSerif,
+    /// Serif system font.
+    Serif,
+    /// Monospace system font.
+    Monospace,
+    /// A named font loaded via `load_font`.
+    Name(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FontWeight {
+    #[default]
     Regular,
     Bold,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TextAlign {
+    #[default]
     Left,
     Center,
     Right,
@@ -150,6 +173,7 @@ pub enum View {
         weight: FontWeight,
         align: TextAlign,
         wrap: bool,
+        family: FontFamily,
         style: Style,
     },
     Button {
@@ -164,6 +188,7 @@ pub enum View {
         corner_radius: f32,
         font_size: f32,
         wrap: bool,
+        family: FontFamily,
         style: Style,
     },
     Column {
@@ -224,6 +249,9 @@ pub enum View {
         value: Signal<String>,
         focused: Signal<bool>,
         cursor: Signal<usize>,
+        /// Horizontal scroll offset in logical pixels. Updated by the renderer
+        /// when the cursor moves beyond the visible area.
+        scroll_x: Signal<f32>,
         placeholder: String,
         font_size: f32,
         bg_color: Color,
@@ -317,6 +345,13 @@ impl TextView {
     pub fn width(mut self, w: f32) -> Self {
         if let View::Text { ref mut style, .. } = self.view {
             style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+
+    pub fn family(mut self, family: FontFamily) -> Self {
+        if let View::Text { family: ref mut f, .. } = self.view {
+            *f = family;
         }
         self
     }
@@ -486,6 +521,13 @@ impl ButtonView {
         self
     }
 
+    pub fn family(mut self, family: FontFamily) -> Self {
+        if let View::Button { family: ref mut f, .. } = self.view {
+            *f = family;
+        }
+        self
+    }
+
     pub fn into_view(self) -> View {
         self.view
     }
@@ -506,6 +548,7 @@ pub fn text(content: impl Into<String>, font_size: f32) -> TextView {
             weight: FontWeight::Regular,
             align: TextAlign::Left,
             wrap: false,
+            family: FontFamily::SansSerif,
             style: Style::default(),
         },
     }
@@ -525,6 +568,7 @@ pub fn button(label: impl Into<String>, on_click: impl Fn() + 'static) -> Button
             corner_radius: 8.0,
             font_size: 16.0,
             wrap: false,
+            family: FontFamily::SansSerif,
             style: Style {
                 padding: taffy::Rect::length(12.0),
                 ..Default::default()
@@ -1168,7 +1212,7 @@ pub fn list(items: Vec<View>, gap: f32, offset_y: Signal<f32>) -> ScrollView {
         shadow: None,
         clip: false,
     };
-    scroll(inner, Signal::new(0.0), offset_y, Signal::new((0.0, 0.0)))
+    scroll(inner, Signal::new(0.0), offset_y, Signal::new((-1.0, -1.0)))
 }
 
 pub struct RectView {
@@ -1364,6 +1408,13 @@ impl TextInputView {
         self
     }
 
+    pub fn fill_width(mut self) -> Self {
+        if let View::TextInput { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
+        }
+        self
+    }
+
     pub fn on_change(mut self, f: impl Fn(String) + 'static) -> Self {
         if let View::TextInput {
             ref mut on_change, ..
@@ -1403,6 +1454,7 @@ pub fn text_input(
             value,
             focused,
             cursor,
+            scroll_x: Signal::new(0.0),
             placeholder: String::new(),
             font_size: 16.0,
             bg_color: Color::WHITE,
@@ -1502,6 +1554,13 @@ impl TextAreaView {
     pub fn height(mut self, h: f32) -> Self {
         if let View::TextArea { ref mut style, .. } = self.view {
             style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+
+    pub fn fill_width(mut self) -> Self {
+        if let View::TextArea { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
         }
         self
     }
@@ -1731,6 +1790,13 @@ impl VirtualListView {
         {
             style.size.height = taffy::Dimension::Length(h);
             *viewport_height = h;
+        }
+        self
+    }
+
+    pub fn fill_width(mut self) -> Self {
+        if let View::VirtualList { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
         }
         self
     }
