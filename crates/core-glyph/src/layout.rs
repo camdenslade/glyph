@@ -102,6 +102,7 @@ pub enum FlatViewKind {
     Image {
         path: String,
         corner_radius: f32,
+        tint: Option<Color>,
     },
     TextArea {
         value: Signal<String>,
@@ -407,9 +408,10 @@ fn build_node(
                     _ => taffy::Dimension::Length(mh),
                 };
                 let style = taffy::Style {
-                    size: taffy::Size {
+                    size: taffy::Size { width: w, height: h },
+                    min_size: taffy::Size {
                         width: w,
-                        height: h,
+                        height: taffy::Dimension::Auto,
                     },
                     ..style.clone()
                 };
@@ -420,45 +422,55 @@ fn build_node(
         }
         View::Button {
             label,
+            child,
             font_size,
             wrap,
             style,
             ..
         } => {
-            let lp_val = |lp: taffy::LengthPercentage| match lp {
-                taffy::LengthPercentage::Length(v) => v,
-                taffy::LengthPercentage::Percent(_) => 0.0,
-            };
-            let pad_x = lp_val(style.padding.left) + lp_val(style.padding.right);
-            let pad_y = lp_val(style.padding.top) + lp_val(style.padding.bottom);
-            if *wrap {
-                taffy
-                    .new_leaf_with_context(
-                        style.clone(),
-                        Some(MeasureContext::Button {
-                            label: label.clone(),
-                            font_size: *font_size,
-                        }),
-                    )
-                    .expect("taffy node")
+            if let Some(child_view) = child {
+                let child_node = build_node(taffy, child_view, measure);
+                let mut btn_style = style.clone();
+                btn_style.align_items = Some(taffy::AlignItems::Center);
+                btn_style.justify_content = Some(taffy::JustifyContent::Center);
+                taffy.new_with_children(btn_style, &[child_node]).expect("taffy node")
             } else {
-                let (tw, th) = measure(label, *font_size, 4096.0);
-                let w = match style.size.width {
-                    taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
-                    _ => taffy::Dimension::Length(tw + pad_x),
+                let lp_val = |lp: taffy::LengthPercentage| match lp {
+                    taffy::LengthPercentage::Length(v) => v,
+                    taffy::LengthPercentage::Percent(_) => 0.0,
                 };
-                let h = match style.size.height {
-                    taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
-                    _ => taffy::Dimension::Length(th + pad_y),
-                };
-                let style = taffy::Style {
-                    size: taffy::Size {
-                        width: w,
-                        height: h,
-                    },
-                    ..style.clone()
-                };
-                taffy.new_leaf(style).expect("taffy node")
+                let pad_x = lp_val(style.padding.left) + lp_val(style.padding.right);
+                let pad_y = lp_val(style.padding.top) + lp_val(style.padding.bottom);
+                if *wrap {
+                    taffy
+                        .new_leaf_with_context(
+                            style.clone(),
+                            Some(MeasureContext::Button {
+                                label: label.clone(),
+                                font_size: *font_size,
+                            }),
+                        )
+                        .expect("taffy node")
+                } else {
+                    let (tw, th) = measure(label, *font_size, 4096.0);
+                    let w = match style.size.width {
+                        taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
+                        _ => taffy::Dimension::Length(tw + pad_x),
+                    };
+                    let h = match style.size.height {
+                        taffy::Dimension::Length(v) => taffy::Dimension::Length(v),
+                        _ => taffy::Dimension::Length(th + pad_y),
+                    };
+                    let style = taffy::Style {
+                        size: taffy::Size { width: w, height: h },
+                        min_size: taffy::Size {
+                            width: w,
+                            height: taffy::Dimension::Auto,
+                        },
+                        ..style.clone()
+                    };
+                    taffy.new_leaf(style).expect("taffy node")
+                }
             }
         }
         View::Image { style, .. } => taffy
@@ -667,6 +679,7 @@ fn collect(
         }
         View::Button {
             label,
+            child,
             on_click,
             on_hover,
             on_press,
@@ -697,6 +710,12 @@ fn collect(
                 },
                 layout: adjusted,
             });
+            if let Some(child_view) = child {
+                let child_nodes = taffy.children(node).expect("children");
+                if let Some(&child_node) = child_nodes.first() {
+                    collect(taffy, child_node, *child_view, flat, x, y, measure);
+                }
+            }
         }
         View::TextInput {
             value,
@@ -882,12 +901,14 @@ fn collect(
         View::Image {
             path,
             corner_radius,
+            tint,
             ..
         } => {
             flat.push(FlatView {
                 kind: FlatViewKind::Image {
                     path,
                     corner_radius,
+                    tint,
                 },
                 layout: adjusted,
             });

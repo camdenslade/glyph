@@ -26,7 +26,7 @@ pub use theme::Theme;
 pub use view::{
     ButtonView, Color, ColumnView, FontFamily, FontWeight, ImageView, Lerp, RectView, RowView, ScrollView, Shadow,
     TextAlign, TextAreaView, TextInputView, TextView, View, VirtualListView, ZStackView,
-    button, column, flex, flexible, image, list, opacity, rect, row, scroll, spacer, text, text_area, text_input, virtual_list, zstack,
+    button, button_view, column, flex, flexible, image, list, opacity, rect, row, scroll, spacer, text, text_area, text_input, virtual_list, zstack,
 };
 pub use router::Router;
 pub use node::{LayoutNode, LayoutProps, NodeKind, StyleProps};

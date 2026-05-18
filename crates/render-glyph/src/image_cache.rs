@@ -50,13 +50,26 @@ impl ImageCache {
 
     /// Upload the image at `path` to the GPU if not already cached.
     /// Relative paths are resolved relative to the executable's directory.
+    /// SVG files are rasterized at their intrinsic size (or 256×256 if unspecified).
     pub fn preload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, path: &str) {
         if self.entries.contains_key(path) {
             return;
         }
         let resolved = self.resolve(path);
-        let Ok(img) = image::open(&resolved) else { return };
-        let img = img.into_rgba8();
+        let img = if resolved.extension().and_then(|e| e.to_str()) == Some("svg") {
+            let Ok(data) = std::fs::read(&resolved) else { return };
+            let Ok(tree) = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()) else { return };
+            let size = tree.size();
+            let w = size.width().ceil() as u32;
+            let h = size.height().ceil() as u32;
+            let (w, h) = if w == 0 || h == 0 { (256, 256) } else { (w, h) };
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h).unwrap();
+            resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+            image::RgbaImage::from_raw(w, h, pixmap.take()).map(image::DynamicImage::ImageRgba8).unwrap_or_else(|| image::DynamicImage::new_rgba8(1, 1)).into_rgba8()
+        } else {
+            let Ok(img) = image::open(&resolved) else { return };
+            img.into_rgba8()
+        };
         let (w, h) = img.dimensions();
         let texture = device.create_texture_with_data(
             queue,

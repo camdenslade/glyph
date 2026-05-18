@@ -1,6 +1,5 @@
-use crate::colors::light;
 use crate::spacing::*;
-use core_glyph::{column, flexible, rect, row, spacer, AlignItems, Color, JustifyContent, View};
+use core_glyph::{column, flexible, rect, row, spacer, AlignItems, Color, JustifyContent, Theme, View};
 
 // Spacers — vertical gaps as invisible rects
 pub fn gap(h: f32) -> View {
@@ -49,32 +48,17 @@ pub fn hgap_8() -> View {
     hgap(SPACE_8)
 }
 
-// Dividers
-pub fn divider() -> View {
-    rect(light::BORDER).height(1.0).fill_width().into()
+pub fn divider(theme: &Theme) -> View {
+    rect(theme.border).height(1.0).fill_width().into()
 }
 pub fn divider_colored(color: Color) -> View {
     rect(color).height(1.0).fill_width().into()
 }
-pub fn divider_v(height: f32) -> View {
-    rect(light::BORDER).width(1.0).height(height).into()
+pub fn divider_v(theme: &Theme, height: f32) -> View {
+    rect(theme.border).width(1.0).height(height).into()
 }
 pub fn divider_v_colored(color: Color, height: f32) -> View {
     rect(color).width(1.0).height(height).into()
-}
-
-// Dividers for dark theme
-pub fn divider_dark() -> View {
-    rect(crate::colors::dark::BORDER)
-        .height(1.0)
-        .fill_width()
-        .into()
-}
-pub fn divider_dark_v(height: f32) -> View {
-    rect(crate::colors::dark::BORDER)
-        .width(1.0)
-        .height(height)
-        .into()
 }
 
 // Centered container — max-width with horizontal centering

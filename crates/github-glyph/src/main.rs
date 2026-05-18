@@ -1,1799 +1,1462 @@
+/// Glyph Git Client
+/// A high-density, keyboard-driven Git desktop client built on the Glyph GPU framework.
+/// Four-zone layout: Nav Strip | Repo Sidebar | Diff Canvas | (Inspector, toggleable)
 use core_glyph::{
-    button, column, image, rect, row, scroll, spacer, text, Color, FontWeight, Signal, Theme, View,
+    button, button_view, column, row, scroll, spacer, text, text_input,
+    Color, FontFamily, FontWeight, Signal, Theme, View,
 };
-use platform_glyph::App;
+use platform_glyph::{App, WindowOpener, WindowCloser};
 use ui_glyph::{
-    badge_colored, shadow_dark_lg, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_12, SPACE_16, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_BASE, TEXT_LG, TEXT_SM, TEXT_XL, TEXT_XS,
+    gap, hgap,
+    icon_checkmark_outline, icon_chevron_down_outline, icon_chevron_forward_outline,
+    icon_close_outline, icon_code_slash_outline,
+    icon_git_branch_outline, icon_git_commit_outline,
+    icon_folder_outline, icon_document_outline,
+    icon_refresh_outline, icon_settings_outline,
+    RADIUS_MD, RADIUS_LG,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
+    TEXT_XS, TEXT_SM, TEXT_BASE,
 };
-use serde::Deserialize;
-use std::{fs, path::PathBuf, sync::Arc, thread};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    thread,
+};
 
-const CLIENT_ID: &str = env!("GITHUB_CLIENT_ID");
+// ── Color tokens (GitHub dark palette) ────────────────────────────────────────
 
-// GitHub's exact design tokens
-const BG: Color = Color::rgb(0.051, 0.067, 0.090); // #0d1117
-const SURFACE: Color = Color::rgb(0.086, 0.106, 0.133); // #161b22
-const SURFACE2: Color = Color::rgb(0.118, 0.122, 0.133); // #1e1f22  (neutral lighter panel bg)
-const BORDER: Color = Color::rgb(0.188, 0.212, 0.243); // #30363d
-const TEXT: Color = Color::rgb(0.902, 0.929, 0.961); // #e6edf3
-const MUTED: Color = Color::rgb(0.486, 0.549, 0.624); // #7d8590
-const SUBTLE: Color = Color::rgb(0.294, 0.333, 0.384); // #4b5562  (dimmer)
-const BLUE: Color = Color::rgb(0.231, 0.557, 0.969); // #3b8eef  darker link blue
-const GREEN: Color = Color::rgb(0.247, 0.722, 0.314); // #3fb950
-const ORANGE: Color = Color::rgb(0.859, 0.427, 0.169); // #db6d28
-const PURPLE: Color = Color::rgb(0.686, 0.431, 0.988); // #af6ef9  (merged PR)
-const RED: Color = Color::rgb(0.953, 0.369, 0.369); // #f35e5e  (closed PR)
-const TOPNAV: Color = Color::rgb(0.027, 0.027, 0.031); // #070709  near-black neutral
-
-fn gh_theme() -> Theme {
-    Theme {
-        background: BG,
-        surface: SURFACE,
-        primary: BLUE,
-        on_primary: TEXT,
-        text: TEXT,
-        text_muted: MUTED,
-        border: BORDER,
-        border_focused: BLUE,
-        radius: 6.0,
-        font_size: 14.0,
-    }
-}
-
-fn asset(name: &str) -> String {
-    format!("{}/assets/{}", env!("CARGO_MANIFEST_DIR"), name)
-}
-
-// --- Data types ---
-
-#[derive(Deserialize, Clone)]
+const BG_BASE:     Color = Color::rgb(0.051, 0.067, 0.090);   // #0D1117
+const BG_SURFACE:  Color = Color::rgb(0.086, 0.106, 0.133);   // #161B22
+const BG_ELEVATED: Color = Color::rgb(0.129, 0.149, 0.176);   // #21262D
+const BORDER:      Color = Color::rgb(0.188, 0.212, 0.239);   // #30363D
+const FG:          Color = Color::rgb(0.902, 0.929, 0.961);   // #E6EDF3
+const FG_MUTED:    Color = Color::rgb(0.490, 0.522, 0.565);   // #7D8590
+const ACCENT:      Color = Color::rgb(0.345, 0.651, 1.000);   // #58A6FF
+const GREEN:       Color = Color::rgb(0.247, 0.722, 0.314);   // #3FB950
+const AMBER:       Color = Color::rgb(0.824, 0.600, 0.133);   // #D29922
+const RED:         Color = Color::rgb(0.973, 0.318, 0.286);   // #F85149
 #[allow(dead_code)]
-struct User {
-    login: String,
-    name: Option<String>,
-    avatar_url: String,
-    bio: Option<String>,
-    public_repos: u32,
-    followers: u32,
-    following: u32,
-    company: Option<String>,
-    location: Option<String>,
-    blog: Option<String>,
+const PURPLE:      Color = Color::rgb(0.737, 0.549, 1.000);   // #BC8CFF
+
+const DIFF_ADD_BG:  Color = Color::rgb(0.051, 0.122, 0.071);  // #0D1F12
+const DIFF_DEL_BG:  Color = Color::rgb(0.125, 0.055, 0.071);  // #200E12
+const DIFF_HUNK_BG: Color = Color::rgb(0.110, 0.176, 0.243);  // #1C2D3E
+
+// ── Git data types ─────────────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq)]
+enum FileStatus {
+    Modified,
+    Added,
+    Deleted,
+    Untracked,
+    Renamed,
+    Conflict,
 }
 
-#[derive(Deserialize, Clone)]
-struct Repo {
-    #[allow(dead_code)]
-    name: String,
-    full_name: String,
-    html_url: String,
-    description: Option<String>,
-    stargazers_count: u32,
-    forks_count: u32,
-    language: Option<String>,
-    private: bool,
-    fork: bool,
-    updated_at: Option<String>,
-}
-
-#[derive(Deserialize, Clone)]
-struct Notification {
-    #[allow(dead_code)]
-    id: String,
-    reason: String,
-    unread: bool,
-    subject: NotificationSubject,
-    repository: NotificationRepo,
-    updated_at: Option<String>,
-}
-
-#[derive(Deserialize, Clone)]
-struct NotificationSubject {
-    title: String,
-    #[serde(rename = "type")]
-    kind: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct NotificationRepo {
-    full_name: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct PullRequest {
-    title: String,
-    number: u32,
-    #[allow(dead_code)]
-    html_url: String,
-    user: PrUser,
-    repository_url: String,
-    state: String,
-    draft: Option<bool>,
-    comments: Option<u32>,
-}
-
-#[derive(Deserialize, Clone)]
-struct PrUser {
-    login: String,
-}
-
-#[derive(Deserialize)]
-struct DeviceCodeResponse {
-    device_code: String,
-    user_code: String,
-    verification_uri: String,
-    interval: u64,
-}
-
-#[derive(Deserialize)]
-struct AccessTokenResponse {
-    access_token: Option<String>,
-    error: Option<String>,
-}
-
-// --- Auth ---
-
-fn token_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("glyph-github")
-        .join("token")
-}
-fn load_token() -> Option<String> {
-    fs::read_to_string(token_path())
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-fn save_token(t: &str) {
-    let p = token_path();
-    if let Some(d) = p.parent() {
-        let _ = fs::create_dir_all(d);
+impl FileStatus {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Modified  => "M",
+            Self::Added     => "A",
+            Self::Deleted   => "D",
+            Self::Untracked => "?",
+            Self::Renamed   => "R",
+            Self::Conflict  => "C",
+        }
     }
-    let _ = fs::write(p, t);
-}
-#[allow(dead_code)]
-fn clear_token() {
-    let _ = fs::remove_file(token_path());
-}
-
-fn client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder()
-        .user_agent("glyph-github/0.1")
-        .build()
-        .unwrap()
-}
-fn api_get<T: for<'de> Deserialize<'de>>(token: &str, url: &str) -> Result<T, String> {
-    let body = client()
-        .get(url)
-        .bearer_auth(token)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .map_err(|e| e.to_string())?
-        .text()
-        .map_err(|e| e.to_string())?;
-    serde_json::from_str(&body).map_err(|e| format!("{e}: {}", &body[..body.len().min(200)]))
+    fn color(&self) -> Color {
+        match self {
+            Self::Modified  => AMBER,
+            Self::Added     => GREEN,
+            Self::Deleted   => RED,
+            Self::Untracked => FG_MUTED,
+            Self::Renamed   => ACCENT,
+            Self::Conflict  => RED,
+        }
+    }
 }
 
 #[derive(Clone)]
-struct DashboardData {
-    user: User,
-    repos: Vec<Repo>,
-    notifications: Vec<Notification>,
-    prs: Vec<PullRequest>,
-    avatar_path: Option<String>,
+struct GitFile {
+    path: String,
+    status: FileStatus,
+    #[allow(dead_code)]
+    staged: bool,
 }
 
-fn fetch_avatar(url: &str, login: &str) -> Option<String> {
-    // Always use .png path — image crate detects format by content, not extension.
-    // Strip query params from URL before fetching so cache key is stable.
-    let fetch_url = url.split('?').next().unwrap_or(url);
-    let path = std::env::temp_dir().join(format!("glyph_avatar_{}.png", login));
-    if path.exists() {
-        return Some(path.to_string_lossy().into_owned());
-    }
-    let resp = client().get(fetch_url).send().ok()?;
-    let bytes = resp.bytes().ok()?;
-    if bytes.is_empty() {
-        return None;
-    }
-    fs::write(&path, &bytes).ok()?;
-    Some(path.to_string_lossy().into_owned())
+#[derive(Clone)]
+enum DiffLineKind {
+    Added,
+    Deleted,
+    Context,
+    HunkHeader,
 }
 
-fn fetch_dashboard(token: &str) -> Result<DashboardData, String> {
-    let user: User = api_get(token, "https://api.github.com/user")?;
-    let repos: Vec<Repo> = api_get(
-        token,
-        "https://api.github.com/user/repos?sort=pushed&per_page=30",
-    )?;
-    let notifications: Vec<Notification> =
-        api_get(token, "https://api.github.com/notifications?per_page=50")?;
-    #[derive(Deserialize)]
-    struct SR {
-        items: Vec<PullRequest>,
-    }
-    let prs = api_get::<SR>(
-        token,
-        &format!(
-            "https://api.github.com/search/issues?q=is:pr+is:open+assignee:{}&per_page=20",
-            user.login
-        ),
-    )
-    .map(|r| r.items)
-    .unwrap_or_default();
-    let avatar_path = fetch_avatar(&user.avatar_url, &user.login);
-    Ok(DashboardData {
-        user,
-        repos,
-        notifications,
-        prs,
-        avatar_path,
-    })
+#[derive(Clone)]
+struct DiffLine {
+    kind: DiffLineKind,
+    old_num: Option<u32>,
+    new_num: Option<u32>,
+    content: String,
 }
 
-fn start_device_flow() -> Result<DeviceCodeResponse, String> {
-    let body = client()
-        .post("https://github.com/login/device/code")
-        .header("Accept", "application/json")
-        .form(&[("client_id", CLIENT_ID), ("scope", "repo notifications")])
-        .send()
-        .map_err(|e| e.to_string())?
-        .text()
-        .map_err(|e| e.to_string())?;
-    serde_json::from_str(&body).map_err(|e| format!("{e}: {body}"))
+#[derive(Clone)]
+struct GitCommit {
+    sha: String,        // full
+    author: String,
+    date_iso: String,
+    message: String,
 }
-fn poll_for_token(code: &str, interval: u64) -> Result<String, String> {
-    loop {
-        thread::sleep(std::time::Duration::from_secs(interval));
-        let body = client()
-            .post("https://github.com/login/oauth/access_token")
-            .header("Accept", "application/json")
-            .form(&[
-                ("client_id", CLIENT_ID),
-                ("device_code", code),
-                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-            ])
-            .send()
-            .map_err(|e| e.to_string())?
-            .text()
-            .map_err(|e| e.to_string())?;
-        let r: AccessTokenResponse =
-            serde_json::from_str(&body).map_err(|e| format!("{e}: {body}"))?;
-        match (r.access_token, r.error.as_deref()) {
-            (Some(t), _) => return Ok(t),
-            (_, Some("authorization_pending")) => continue,
-            (_, Some("slow_down")) => {
-                thread::sleep(std::time::Duration::from_secs(5));
-                continue;
-            }
-            (_, Some(e)) => return Err(e.to_string()),
-            _ => continue,
-        }
+
+impl GitCommit {
+    fn short_sha(&self) -> &str {
+        &self.sha[..self.sha.len().min(7)]
+    }
+    fn message_first_line(&self) -> &str {
+        self.message.lines().next().unwrap_or("")
+    }
+    fn relative_time(&self) -> String {
+        relative_date(&self.date_iso)
     }
 }
 
-// --- Tab enum ---
+#[derive(Clone)]
+struct GitBranch {
+    name: String,
+    is_current: bool,
+    is_remote: bool,
+    ahead: u32,
+    behind: u32,
+}
+
+// ── App state ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
-enum Tab {
-    Overview,
-    Repos,
-    Notifications,
-    PullRequests,
+enum SidebarTab { Changes, History, Branches }
+
+#[derive(Clone, PartialEq)]
+enum FocusRegion {
+    Sidebar,
+    DiffCanvas,
+    #[allow(dead_code)]
+    CommitSummary,
+    #[allow(dead_code)]
+    CommitBody,
 }
 
-// --- Login screen ---
+#[derive(Clone)]
+struct AppState {
+    repo_path:       Option<PathBuf>,
+    current_branch:  String,
 
-struct LoginScreen {
-    user_code: Signal<Option<String>>,
-    error: Signal<Option<String>>,
-    token_out: Signal<Option<String>>,
+    // sidebar
+    tab:             SidebarTab,
+    staged:          Vec<GitFile>,
+    unstaged:        Vec<GitFile>,
+    commits:         Vec<GitCommit>,
+    branches:        Vec<GitBranch>,
+
+    // diff
+    diff_lines:      Vec<DiffLine>,
+    active_file:     Option<String>,
+    selected_file_idx: Option<usize>, // index into (unstaged ++ staged)
+
+    // commit panel
+    commit_summary:  String,
+    commit_body:     String,
+    commit_expanded: bool,
+
+    // focus
+    focus:           FocusRegion,
+
+    // error banner
+    error:           Option<String>,
+
+    // loading
+    loading:         bool,
 }
 
-impl LoginScreen {
-    fn new() -> Self {
-        let s = Self {
-            user_code: Signal::new(None),
-            error: Signal::new(None),
-            token_out: Signal::new(None),
-        };
-        let (uc, err, tok) = (s.user_code.clone(), s.error.clone(), s.token_out.clone());
-        thread::spawn(move || match start_device_flow() {
-            Err(e) => err.set(Some(e)),
-            Ok(resp) => {
-                uc.set(Some(resp.user_code.clone()));
-                let _ = open::that(&resp.verification_uri);
-                match poll_for_token(&resp.device_code, resp.interval) {
-                    Ok(t) => {
-                        save_token(&t);
-                        tok.set(Some(t));
-                    }
-                    Err(e) => err.set(Some(e)),
-                }
-            }
-        });
-        s
+impl AppState {
+    fn new(repo_path: Option<PathBuf>) -> Self {
+        Self {
+            repo_path,
+            current_branch: String::new(),
+            tab: SidebarTab::Changes,
+            staged: vec![],
+            unstaged: vec![],
+            commits: vec![],
+            branches: vec![],
+            diff_lines: vec![],
+            active_file: None,
+            selected_file_idx: None,
+            commit_summary: String::new(),
+            commit_body: String::new(),
+            commit_expanded: false,
+            focus: FocusRegion::Sidebar,
+            error: None,
+            loading: false,
+        }
     }
 
-    fn render(&self) -> View {
-        let body: Vec<View> = if let Some(err) = self.error.get() {
-            vec![row(vec![
-                rect(RED).width(3.0).height(40.0).into(),
-                column(vec![
-                    text("Authentication failed", TEXT_SM)
-                        .weight(FontWeight::Bold)
-                        .color(RED)
-                        .into(),
-                    text(err, TEXT_XS).color(MUTED).wrap().into(),
-                ])
-                .gap(SPACE_1)
-                .padding_x(SPACE_3)
-                .into(),
-            ])
-            .bg(Color::rgba(0.953, 0.369, 0.369, 0.08))
-            .border(Color::rgba(0.953, 0.369, 0.369, 0.25), 1.0)
-            .radius(RADIUS_MD)
-            .into()]
-        } else if let Some(code) = self.user_code.get() {
-            vec![
-                text("Open in your browser:", TEXT_SM).color(MUTED).into(),
-                text("github.com/login/device", TEXT_SM)
-                    .weight(FontWeight::Bold)
-                    .color(BLUE)
-                    .into(),
-                sp(SPACE_2),
-                text("Enter this code:", TEXT_SM).color(MUTED).into(),
-                column(vec![text(code, 32.0)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into()])
-                .padding(SPACE_4)
-                .bg(SURFACE2)
-                .border(BORDER, 1.0)
-                .radius(RADIUS_LG)
-                .into(),
-                sp(SPACE_2),
-                row(vec![
-                    rect(GREEN).width(6.0).height(6.0).radius(3.0).into(),
-                    text("Waiting for authorization…", TEXT_XS)
-                        .color(MUTED)
-                        .into(),
-                ])
-                .gap(SPACE_2)
-                .into(),
-            ]
-        } else {
-            vec![row(vec![
-                rect(BLUE).width(6.0).height(6.0).radius(3.0).into(),
-                text("Opening browser…", TEXT_SM).color(MUTED).into(),
-            ])
-            .gap(SPACE_2)
-            .into()]
-        };
-
-        // Full-screen centered card
-        column(vec![column(vec![
-            // Header
-            row(vec![
-                image(asset("github_mark.png")).size(28.0, 28.0).into(),
-                text("GitHub", TEXT_LG)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into(),
-            ])
-            .gap(SPACE_3)
-            .into(),
-            sp(SPACE_2),
-            text("Sign in to your account", TEXT_XL)
-                .weight(FontWeight::Bold)
-                .color(TEXT)
-                .into(),
-            text(
-                "Glyph needs read access to your repos and notifications.",
-                TEXT_SM,
-            )
-            .color(MUTED)
-            .wrap()
-            .into(),
-            sp(SPACE_4),
-            rect(BORDER).height(1.0).fill_width().into(),
-            sp(SPACE_4),
-            column(body).gap(SPACE_3).into(),
-        ])
-        .gap(0.0)
-        .padding(SPACE_8)
-        .width(420.0)
-        .bg(SURFACE)
-        .border(BORDER, 1.0)
-        .radius(RADIUS_LG)
-        .shadow(shadow_dark_lg())
-        .into()])
-        .padding(80.0)
-        .align_center()
-        .fill_width()
-        .into()
-    }
-}
-
-// --- Dashboard ---
-
-struct DashboardScreen {
-    token: String,
-    tab: Signal<Tab>,
-    data: Signal<Option<DashboardData>>,
-    error: Signal<Option<String>>,
-    scroll_y: Signal<f32>,
-    scroll_x: Signal<f32>,
-    max_scroll: Signal<(f32, f32)>,
-}
-
-impl DashboardScreen {
-    fn new(token: String) -> Self {
-        let s = Self {
-            token: token.clone(),
-            tab: Signal::new(Tab::Overview),
-            data: Signal::new(None),
-            error: Signal::new(None),
-            scroll_y: Signal::new(0.0),
-            scroll_x: Signal::new(0.0),
-            max_scroll: Signal::new((-1.0, -1.0)),
-        };
-        s.refresh();
-        s
-    }
-
-    fn refresh(&self) {
-        let (token, data, error) = (self.token.clone(), self.data.clone(), self.error.clone());
-        self.data.set(None);
-        self.error.set(None);
-        thread::spawn(move || match fetch_dashboard(&token) {
-            Ok(d) => data.set(Some(d)),
-            Err(e) => error.set(Some(e)),
-        });
-    }
-
-    fn render(&self) -> View {
-        let tab = self.tab.get();
-
-        let avatar_path = self.data.get().as_ref().and_then(|d| d.avatar_path.clone());
-        let topnav = self.render_topnav(&tab, avatar_path.as_deref());
-
-        let content = match &tab {
-            Tab::Overview => self.render_overview(),
-            Tab::Repos => self.render_repos(),
-            Tab::Notifications => self.render_notifications(),
-            Tab::PullRequests => self.render_prs(),
-        };
-
-        let body = scroll(
-            content,
-            self.scroll_x.clone(),
-            self.scroll_y.clone(),
-            self.max_scroll.clone(),
-        )
-        .fill_width()
-        .grow()
-        .into();
-
-        column(vec![topnav, body])
-            .gap(0.0)
-            .fill_width()
-            .fill_height()
-            .into()
-    }
-
-    fn render_topnav(&self, tab: &Tab, avatar_path: Option<&str>) -> View {
-        let login = self
-            .data
-            .get()
-            .as_ref()
-            .map(|d| d.user.login.clone())
-            .unwrap_or_default();
-
-        let unread = self
-            .data
-            .get()
-            .as_ref()
-            .map(|d| d.notifications.iter().filter(|n| n.unread).count())
-            .unwrap_or(0);
-
-        let tabs: &[(&str, Tab)] = &[
-            ("Overview", Tab::Overview),
-            ("Repositories", Tab::Repos),
-            ("Notifications", Tab::Notifications),
-            ("Pull Requests", Tab::PullRequests),
-        ];
-
-        let tab_items: Vec<View> = tabs
-            .iter()
-            .map(|(label, t)| {
-                let is_active = tab == t;
-                let tab_sig = self.tab.clone();
-                let t = t.clone();
-                let fg = if is_active { TEXT } else { MUTED };
-                let underline = if is_active {
-                    ORANGE
-                } else {
-                    Color::TRANSPARENT
-                };
-                let hover_bg = if is_active {
-                    Color::TRANSPARENT
-                } else {
-                    Color::rgba(1.0, 1.0, 1.0, 0.06)
-                };
-
-                // Build label with optional inline badge
-                let has_badge = matches!(t, Tab::Notifications) && unread > 0;
-                let badge_str = if has_badge {
-                    format!("  {}", unread)
-                } else {
-                    String::new()
-                };
-                let btn_label = format!("{}{}", label, badge_str);
-
-                let btn = button(btn_label, move || {
-                    if !is_active {
-                        tab_sig.set(t.clone());
-                    }
-                })
-                .bg(Color::TRANSPARENT)
-                .hover_bg(hover_bg)
-                .text_color(fg)
-                .font_size(13.0)
-                .padding(SPACE_3)
-                .height(36.0)
-                .into();
-
-                column(vec![btn, rect(underline).height(2.0).fill_width().into()])
-                    .gap(0.0)
-                    .auto_size()
-                    .into()
-            })
+    #[allow(dead_code)]
+    fn all_files(&self) -> Vec<&GitFile> {
+        // conflicts first, then unstaged, then staged
+        let mut v: Vec<&GitFile> = self.unstaged.iter()
+            .filter(|f| f.status == FileStatus::Conflict)
             .collect();
-
-        // Top black bar
-        let black_bar = row(vec![
-            // Left: logos
-            row(vec![
-                image(asset("glyph_logo.png"))
-                    .size(20.0, 20.0)
-                    .radius(4.0)
-                    .into(),
-                image(asset("github_mark.png")).size(20.0, 20.0).into(),
-            ])
-            .gap(SPACE_3)
-            .into(),
-            spacer(),
-            // Right: username
-            if !login.is_empty() {
-                let avatar_view: View = if let Some(path) = avatar_path {
-                    image(path).size(24.0, 24.0).radius(12.0).into()
-                } else {
-                    column(vec![text(
-                        login
-                            .chars()
-                            .next()
-                            .map(|c| c.to_uppercase().to_string())
-                            .unwrap_or_default(),
-                        11.0,
-                    )
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into()])
-                    .width(24.0)
-                    .height(24.0)
-                    .bg(Color::rgb(0.18, 0.18, 0.20))
-                    .border(BORDER, 1.0)
-                    .radius(12.0)
-                    .align_center()
-                    .justify_center()
-                    .into()
-                };
-                row(vec![
-                    avatar_view,
-                    text(&login, TEXT_SM)
-                        .weight(FontWeight::Bold)
-                        .color(TEXT)
-                        .into(),
-                ])
-                .gap(SPACE_2)
-                .into()
-            } else {
-                spacer()
-            },
-        ])
-        .gap(SPACE_4)
-        .padding_x(SPACE_6)
-        .padding_y(SPACE_3)
-        .fill_width()
-        .bg(TOPNAV)
-        .into();
-
-        // Tab bar below — left-aligned
-        let tab_bar = column(vec![
-            row(tab_items).gap(0.0).justify_start().into(),
-            rect(BORDER).height(1.0).fill_width().into(),
-        ])
-        .gap(0.0)
-        .padding_x(SPACE_6)
-        .fill_width()
-        .bg(SURFACE)
-        .into();
-
-        column(vec![black_bar, tab_bar]).gap(0.0).into()
+        v.extend(self.unstaged.iter().filter(|f| f.status != FileStatus::Conflict));
+        v.extend(self.staged.iter());
+        v
     }
 
-    fn render_overview(&self) -> View {
-        let Some(data) = self.data.get() else {
-            return self.loading_or_error();
-        };
-        let u = &data.user;
-
-        let pinned: Vec<&Repo> = data
-            .repos
-            .iter()
-            .filter(|r| !r.fork && r.full_name.starts_with(&format!("{}/", u.login)))
-            .take(6)
-            .collect();
-
-        let sidebar = self.render_profile_sidebar(u, data.avatar_path.as_deref());
-        let main = self.render_overview_main(u, &pinned, &data.repos);
-
-        row(vec![sidebar, main])
-            .gap(0.0)
-            .fill_width()
-            .align_start()
-            .into()
-    }
-
-    fn render_profile_sidebar(&self, u: &User, avatar_path: Option<&str>) -> View {
-        let initial = u
-            .login
-            .chars()
-            .next()
-            .map(|c| c.to_uppercase().to_string())
-            .unwrap_or_default();
-
-        let avatar_view: View = if let Some(path) = avatar_path {
-            image(path).size(88.0, 88.0).radius(44.0).into()
-        } else {
-            column(vec![text(initial, 36.0)
-                .weight(FontWeight::Bold)
-                .color(TEXT)
-                .into()])
-            .width(88.0)
-            .height(88.0)
-            .bg(Color::rgb(0.15, 0.15, 0.17))
-            .border(BORDER, 2.0)
-            .radius(44.0)
-            .align_center()
-            .justify_center()
-            .into()
-        };
-
-        let mut items: Vec<View> = vec![
-            avatar_view,
-            sp(SPACE_3),
-            // Name + login
-            text(u.name.as_deref().unwrap_or(&u.login), 22.0)
-                .weight(FontWeight::Bold)
-                .color(TEXT)
-                .into(),
-            text(format!("@{}", u.login), TEXT_BASE).color(MUTED).into(),
-            sp(SPACE_3),
-        ];
-
-        // Bio
-        if let Some(bio) = &u.bio {
-            if !bio.is_empty() {
-                items.push(text(bio, TEXT_SM).color(TEXT).wrap().into());
-                items.push(sp(SPACE_3));
-            }
-        }
-
-        // Follow button
-        items.push(
-            button("Follow", || {})
-                .bg(SURFACE2)
-                .hover_bg(Color::rgb(0.20, 0.21, 0.23))
-                .text_color(TEXT)
-                .border_not_supported_use_container_border()
-                .font_size(TEXT_SM)
-                .height(30.0)
-                .padding(SPACE_4)
-                .radius(RADIUS_MD)
-                .into(),
-        );
-
-        items.push(sp(SPACE_4));
-        items.push(rect(BORDER).height(1.0).fill_width().into());
-        items.push(sp(SPACE_4));
-
-        // Followers / following
-        items.push(
-            row(vec![
-                text(format_count(u.followers), TEXT_SM)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into(),
-                text(" followers", TEXT_SM).color(MUTED).into(),
-                text("  ·  ", TEXT_SM).color(SUBTLE).into(),
-                text(format_count(u.following), TEXT_SM)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into(),
-                text(" following", TEXT_SM).color(MUTED).into(),
-            ])
-            .gap(0.0)
-            .into(),
-        );
-
-        // Company / location / blog
-        if let Some(company) = &u.company {
-            if !company.is_empty() {
-                items.push(sp(SPACE_2));
-                items.push(
-                    row(vec![
-                        text("@", TEXT_SM).color(SUBTLE).into(),
-                        text(company.trim_start_matches('@'), TEXT_SM)
-                            .color(MUTED)
-                            .into(),
-                    ])
-                    .gap(0.0)
-                    .into(),
-                );
-            }
-        }
-        if let Some(location) = &u.location {
-            if !location.is_empty() {
-                items.push(sp(SPACE_2));
-                items.push(text(location, TEXT_SM).color(MUTED).into());
-            }
-        }
-        if let Some(blog) = &u.blog {
-            if !blog.is_empty() {
-                items.push(sp(SPACE_2));
-                items.push(text(blog, TEXT_SM).color(BLUE).into());
-            }
-        }
-
-        column(items).gap(0.0).padding(SPACE_6).width(280.0).into()
-    }
-
-    fn render_overview_main(&self, _u: &User, pinned: &[&Repo], all_repos: &[Repo]) -> View {
-        // Pinned repos grid — 2 columns
-        let pinned_rows: Vec<View> = pinned
-            .chunks(2)
-            .map(|chunk| {
-                if chunk.len() == 2 {
-                    row(vec![
-                        column(vec![repo_card(chunk[0])]).grow().into(),
-                        column(vec![repo_card(chunk[1])]).grow().into(),
-                    ])
-                    .gap(SPACE_3)
-                    .fill_width()
-                    .align_start()
-                    .into()
-                } else {
-                    row(vec![
-                        column(vec![repo_card(chunk[0])]).grow().into(),
-                        column(vec![]).grow().into(),
-                    ])
-                    .gap(SPACE_3)
-                    .fill_width()
-                    .align_start()
-                    .into()
-                }
-            })
-            .collect();
-
-        // Recent activity section — last 5 pushed repos
-        let recent: Vec<&Repo> = all_repos.iter().take(5).collect();
-
-        column(vec![
-            // Pinned
-            if !pinned.is_empty() {
-                column(vec![
-                    row(vec![
-                        text("Pinned", TEXT_SM)
-                            .weight(FontWeight::Bold)
-                            .color(TEXT)
-                            .into(),
-                        spacer(),
-                        text("Customize your pins", TEXT_XS).color(BLUE).into(),
-                    ])
-                    .fill_width()
-                    .into(),
-                    sp(SPACE_3),
-                    column(pinned_rows).gap(SPACE_3).into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-            sp(SPACE_6),
-            // Recent activity
-            column(vec![
-                text("Recent activity", TEXT_SM)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into(),
-                sp(SPACE_3),
-                column(recent.iter().map(|r| activity_row(r)).collect())
-                    .gap(0.0)
-                    .bg(SURFACE)
-                    .border(BORDER, 1.0)
-                    .radius(RADIUS_LG)
-                    .clip()
-                    .into(),
-            ])
-            .gap(0.0)
-            .into(),
-        ])
-        .gap(0.0)
-        .padding(SPACE_6)
-        .fill_width()
-        .into()
-    }
-
-    fn render_repos(&self) -> View {
-        let Some(data) = self.data.get() else {
-            return self.loading_or_error();
-        };
-
-        let total = data.repos.len();
-        let own: Vec<&Repo> = data.repos.iter().filter(|r| !r.fork).collect();
-        let forked: Vec<&Repo> = data.repos.iter().filter(|r| r.fork).collect();
-
-        column(vec![
-            // Header row
-            row(vec![
-                column(vec![row(vec![
-                    text("Repositories", TEXT_LG)
-                        .weight(FontWeight::Bold)
-                        .color(TEXT)
-                        .into(),
-                    badge_colored(total.to_string(), Color::rgba(1.0, 1.0, 1.0, 0.08), MUTED),
-                ])
-                .gap(SPACE_2)
-                .into()])
-                .into(),
-                spacer(),
-                button("New", || {})
-                    .bg(GREEN)
-                    .hover_bg(Color::rgb(0.18, 0.60, 0.25))
-                    .text_color(Color::rgb(0.012, 0.027, 0.020))
-                    .font_size(TEXT_SM)
-                    .height(30.0)
-                    .padding(SPACE_3)
-                    .radius(RADIUS_MD)
-                    .into(),
-            ])
-            .fill_width()
-            .into(),
-            sp(SPACE_4),
-            // Repo list — owned first
-            if !own.is_empty() {
-                column(vec![
-                    text("Owned", TEXT_XS)
-                        .weight(FontWeight::Bold)
-                        .color(SUBTLE)
-                        .into(),
-                    sp(SPACE_2),
-                    column(own.iter().map(|r| repo_list_row(r)).collect())
-                        .gap(0.0)
-                        .bg(SURFACE)
-                        .border(BORDER, 1.0)
-                        .radius(RADIUS_LG)
-                        .clip()
-                        .into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-            sp(SPACE_6),
-            // Forked
-            if !forked.is_empty() {
-                column(vec![
-                    text("Forked", TEXT_XS)
-                        .weight(FontWeight::Bold)
-                        .color(SUBTLE)
-                        .into(),
-                    sp(SPACE_2),
-                    column(forked.iter().map(|r| repo_list_row(r)).collect())
-                        .gap(0.0)
-                        .bg(SURFACE)
-                        .border(BORDER, 1.0)
-                        .radius(RADIUS_LG)
-                        .clip()
-                        .into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-        ])
-        .gap(0.0)
-        .padding(SPACE_6)
-        .fill_width()
-        .into()
-    }
-
-    fn render_notifications(&self) -> View {
-        let Some(data) = self.data.get() else {
-            return self.loading_or_error();
-        };
-
-        if data.notifications.is_empty() {
-            return column(vec![
-                sp(SPACE_16),
-                column(vec![
-                    text("All caught up!", TEXT_LG)
-                        .weight(FontWeight::Bold)
-                        .color(TEXT)
-                        .into(),
-                    text("Nothing new in your inbox.", TEXT_SM)
-                        .color(MUTED)
-                        .into(),
-                ])
-                .gap(SPACE_2)
-                .align_center()
-                .into(),
-            ])
-            .padding(SPACE_6)
-            .align_center()
-            .fill_width()
-            .into();
-        }
-
-        let unread: Vec<&Notification> = data.notifications.iter().filter(|n| n.unread).collect();
-        let read: Vec<&Notification> = data.notifications.iter().filter(|n| !n.unread).collect();
-
-        column(vec![
-            row(vec![
-                text("Inbox", TEXT_LG)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into(),
-                if !unread.is_empty() {
-                    badge_colored(
-                        unread.len().to_string(),
-                        Color::rgba(0.345, 0.651, 1.0, 0.18),
-                        BLUE,
-                    )
-                } else {
-                    column(vec![]).into()
-                },
-                spacer(),
-                button("Mark all read", || {})
-                    .bg(Color::TRANSPARENT)
-                    .hover_bg(Color::rgba(1.0, 1.0, 1.0, 0.06))
-                    .text_color(MUTED)
-                    .font_size(TEXT_XS)
-                    .height(28.0)
-                    .padding(SPACE_2)
-                    .radius(RADIUS_MD)
-                    .into(),
-            ])
-            .gap(SPACE_2)
-            .fill_width()
-            .into(),
-            sp(SPACE_4),
-            if !unread.is_empty() {
-                column(vec![
-                    text("Unread", TEXT_XS)
-                        .weight(FontWeight::Bold)
-                        .color(SUBTLE)
-                        .into(),
-                    sp(SPACE_2),
-                    column(unread.iter().map(|n| notif_row(n)).collect())
-                        .gap(0.0)
-                        .bg(SURFACE)
-                        .border(BORDER, 1.0)
-                        .radius(RADIUS_LG)
-                        .clip()
-                        .into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-            sp(SPACE_6),
-            if !read.is_empty() {
-                column(vec![
-                    text("Read", TEXT_XS)
-                        .weight(FontWeight::Bold)
-                        .color(SUBTLE)
-                        .into(),
-                    sp(SPACE_2),
-                    column(read.iter().map(|n| notif_row(n)).collect())
-                        .gap(0.0)
-                        .bg(SURFACE)
-                        .border(BORDER, 1.0)
-                        .radius(RADIUS_LG)
-                        .clip()
-                        .into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-        ])
-        .gap(0.0)
-        .padding(SPACE_6)
-        .fill_width()
-        .into()
-    }
-
-    fn render_prs(&self) -> View {
-        let Some(data) = self.data.get() else {
-            return self.loading_or_error();
-        };
-
-        if data.prs.is_empty() {
-            return column(vec![
-                sp(SPACE_16),
-                column(vec![
-                    text("No open pull requests", TEXT_LG)
-                        .weight(FontWeight::Bold)
-                        .color(TEXT)
-                        .into(),
-                    text("No open PRs assigned to you right now.", TEXT_SM)
-                        .color(MUTED)
-                        .into(),
-                ])
-                .gap(SPACE_2)
-                .align_center()
-                .into(),
-            ])
-            .padding(SPACE_6)
-            .align_center()
-            .fill_width()
-            .into();
-        }
-
-        let open: Vec<&PullRequest> = data.prs.iter().filter(|p| p.state == "open").collect();
-        let closed: Vec<&PullRequest> = data.prs.iter().filter(|p| p.state != "open").collect();
-
-        column(vec![
-            row(vec![
-                text("Pull Requests", TEXT_LG)
-                    .weight(FontWeight::Bold)
-                    .color(TEXT)
-                    .into(),
-                badge_colored(
-                    open.len().to_string(),
-                    Color::rgba(0.247, 0.722, 0.314, 0.18),
-                    GREEN,
-                ),
-            ])
-            .gap(SPACE_2)
-            .into(),
-            sp(SPACE_4),
-            if !open.is_empty() {
-                column(vec![
-                    text("Open", TEXT_XS)
-                        .weight(FontWeight::Bold)
-                        .color(SUBTLE)
-                        .into(),
-                    sp(SPACE_2),
-                    column(open.iter().map(|p| pr_row(p)).collect())
-                        .gap(0.0)
-                        .bg(SURFACE)
-                        .border(BORDER, 1.0)
-                        .radius(RADIUS_LG)
-                        .clip()
-                        .into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-            sp(SPACE_6),
-            if !closed.is_empty() {
-                column(vec![
-                    text("Closed / Merged", TEXT_XS)
-                        .weight(FontWeight::Bold)
-                        .color(SUBTLE)
-                        .into(),
-                    sp(SPACE_2),
-                    column(closed.iter().map(|p| pr_row(p)).collect())
-                        .gap(0.0)
-                        .bg(SURFACE)
-                        .border(BORDER, 1.0)
-                        .radius(RADIUS_LG)
-                        .clip()
-                        .into(),
-                ])
-                .gap(0.0)
-                .into()
-            } else {
-                column(vec![]).into()
-            },
-        ])
-        .gap(0.0)
-        .padding(SPACE_6)
-        .fill_width()
-        .into()
-    }
-
-    fn loading_or_error(&self) -> View {
-        if let Some(err) = self.error.get() {
-            column(vec![
-                sp(SPACE_8),
-                row(vec![
-                    rect(RED).width(3.0).height(48.0).into(),
-                    column(vec![
-                        text("Failed to load", TEXT_SM)
-                            .weight(FontWeight::Bold)
-                            .color(RED)
-                            .into(),
-                        text(err, TEXT_XS).color(MUTED).wrap().into(),
-                    ])
-                    .gap(SPACE_1)
-                    .padding_x(SPACE_3)
-                    .into(),
-                ])
-                .bg(Color::rgba(0.953, 0.369, 0.369, 0.08))
-                .border(Color::rgba(0.953, 0.369, 0.369, 0.25), 1.0)
-                .radius(RADIUS_MD)
-                .fill_width()
-                .into(),
-            ])
-            .padding(SPACE_6)
-            .into()
-        } else {
-            column(vec![
-                sp(SPACE_12),
-                row(vec![
-                    rect(BLUE).width(6.0).height(6.0).radius(3.0).into(),
-                    text("Loading…", TEXT_SM).color(MUTED).into(),
-                ])
-                .gap(SPACE_2)
-                .into(),
-            ])
-            .gap(0.0)
-            .padding(SPACE_6)
-            .align_center()
-            .fill_width()
-            .into()
-        }
+    #[allow(dead_code)]
+    fn selected_file(&self) -> Option<&GitFile> {
+        self.selected_file_idx.and_then(|i| self.all_files().into_iter().nth(i))
     }
 }
 
-// --- Row / card components ---
+// ── Git shell commands ─────────────────────────────────────────────────────────
 
-// Compact card used in the 2-col pinned grid
-fn repo_card(repo: &Repo) -> View {
-    let parts: Vec<&str> = repo.full_name.splitn(2, '/').collect();
-    let repo_name = if parts.len() == 2 {
-        parts[1]
+fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        &repo.full_name
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+fn git_current_branch(repo: &Path) -> String {
+    git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .unwrap_or_default().trim().to_string()
+}
+
+fn git_status(repo: &Path) -> (Vec<GitFile>, Vec<GitFile>) {
+    let raw = match git(repo, &["status", "--porcelain", "-u"]) {
+        Ok(s) => s,
+        Err(_) => return (vec![], vec![]),
     };
-    let url = repo.html_url.clone();
+    let mut staged = vec![];
+    let mut unstaged = vec![];
+    for line in raw.lines() {
+        if line.len() < 3 { continue; }
+        let xy = &line[..2];
+        let path = line[3..].to_string();
+        let x = xy.chars().next().unwrap_or(' ');
+        let y = xy.chars().nth(1).unwrap_or(' ');
 
-    let mut footer: Vec<View> = vec![];
-    if let Some(lang) = &repo.language {
-        footer.push(lang_dot(lang));
-        footer.push(text(lang, TEXT_XS).color(MUTED).into());
-    }
-    if repo.stargazers_count > 0 {
-        if !footer.is_empty() {
-            footer.push(hsp(SPACE_3));
+        // Staged column (X)
+        if x != ' ' && x != '?' {
+            let status = char_to_status(x);
+            staged.push(GitFile { path: path.clone(), status, staged: true });
         }
-        footer.push(
-            row(vec![
-                image(asset("star.png")).size(12.0, 12.0).into(),
-                text(format_count(repo.stargazers_count), TEXT_XS)
-                    .color(MUTED)
-                    .into(),
-            ])
-            .gap(SPACE_1)
-            .into(),
-        );
+        // Unstaged / untracked column (Y)
+        if y != ' ' {
+            let status = if y == '?' { FileStatus::Untracked } else { char_to_status(y) };
+            unstaged.push(GitFile { path: path.clone(), status, staged: false });
+        }
     }
-
-    column(vec![
-        // Header: name + visibility badge
-        row(vec![
-            column(vec![row(vec![
-                if repo.private {
-                    image(asset("lock.png")).size(12.0, 12.0).into()
-                } else {
-                    rect(Color::TRANSPARENT).width(1.0).height(1.0).into()
-                },
-                button(repo_name, move || {
-                    let _ = open::that(&url);
-                })
-                .bg(Color::TRANSPARENT)
-                .hover_bg(Color::TRANSPARENT)
-                .text_color(BLUE)
-                .font_size(TEXT_SM)
-                .padding(0.0)
-                .into(),
-            ])
-            .gap(SPACE_2)
-            .into()])
-            .grow()
-            .into(),
-            if repo.private {
-                badge_colored("Private", Color::rgba(1.0, 1.0, 1.0, 0.06), MUTED)
-            } else {
-                badge_colored("Public", Color::rgba(1.0, 1.0, 1.0, 0.04), SUBTLE)
-            },
-        ])
-        .fill_width()
-        .into(),
-        // Description (or empty filler to push footer down)
-        if let Some(desc) = &repo.description {
-            if !desc.is_empty() {
-                text(desc, TEXT_XS).color(MUTED).wrap().into()
-            } else {
-                spacer()
-            }
-        } else {
-            spacer()
-        },
-        // Footer: language dot + stars
-        if !footer.is_empty() {
-            row(footer).gap(SPACE_1).into()
-        } else {
-            rect(Color::TRANSPARENT).height(14.0).into()
-        },
-    ])
-    .gap(SPACE_2)
-    .padding(SPACE_4)
-    .fill_width()
-    .min_size(0.0, 90.0)
-    .bg(SURFACE)
-    .border(BORDER, 1.0)
-    .radius(RADIUS_LG)
-    .into()
+    (staged, unstaged)
 }
 
-// Full-width row used in activity feed
-fn activity_row(repo: &Repo) -> View {
-    let url = repo.html_url.clone();
-    let parts: Vec<&str> = repo.full_name.splitn(2, '/').collect();
-    let (owner, name) = if parts.len() == 2 {
-        (parts[0], parts[1])
-    } else {
-        ("", repo.full_name.as_str())
+fn char_to_status(c: char) -> FileStatus {
+    match c {
+        'M' => FileStatus::Modified,
+        'A' => FileStatus::Added,
+        'D' => FileStatus::Deleted,
+        'R' => FileStatus::Renamed,
+        'U' | 'C' => FileStatus::Conflict,
+        _ => FileStatus::Untracked,
+    }
+}
+
+fn git_log(repo: &Path) -> Vec<GitCommit> {
+    let raw = match git(repo, &[
+        "log", "--pretty=format:%H%x1f%an%x1f%ai%x1f%s", "-n", "200",
+    ]) {
+        Ok(s) => s,
+        Err(_) => return vec![],
     };
-
-    let mut meta: Vec<View> = vec![];
-    if let Some(lang) = &repo.language {
-        meta.push(lang_dot(lang));
-        meta.push(text(lang, TEXT_XS).color(MUTED).into());
-    }
-    if repo.stargazers_count > 0 {
-        if !meta.is_empty() {
-            meta.push(hsp(SPACE_4));
-        }
-        meta.push(
-            row(vec![
-                image(asset("star.png")).size(11.0, 11.0).into(),
-                text(format_count(repo.stargazers_count), TEXT_XS)
-                    .color(MUTED)
-                    .into(),
-            ])
-            .gap(SPACE_1)
-            .into(),
-        );
-    }
-    if repo.forks_count > 0 {
-        if !meta.is_empty() {
-            meta.push(hsp(SPACE_4));
-        }
-        meta.push(
-            row(vec![
-                text("⑂", TEXT_XS).color(MUTED).into(),
-                text(format_count(repo.forks_count), TEXT_XS)
-                    .color(MUTED)
-                    .into(),
-            ])
-            .gap(SPACE_1)
-            .into(),
-        );
-    }
-
-    column(vec![
-        row(vec![column(vec![
-            row(vec![
-                text(owner, TEXT_SM).color(MUTED).into(),
-                text("/", TEXT_SM).color(SUBTLE).into(),
-                button(name, move || {
-                    let _ = open::that(&url);
-                })
-                .bg(Color::TRANSPARENT)
-                .hover_bg(Color::TRANSPARENT)
-                .text_color(BLUE)
-                .font_size(TEXT_SM)
-                .padding(0.0)
-                .into(),
-                if repo.private {
-                    row(vec![
-                        hsp(SPACE_2),
-                        badge_colored("Private", Color::rgba(1.0, 1.0, 1.0, 0.06), MUTED),
-                    ])
-                    .gap(0.0)
-                    .into()
-                } else {
-                    column(vec![]).into()
-                },
-            ])
-            .gap(SPACE_2)
-            .align_center()
-            .no_wrap()
-            .into(),
-            if let Some(desc) = &repo.description {
-                if !desc.is_empty() {
-                    text(desc, TEXT_XS).color(MUTED).wrap().into()
-                } else {
-                    column(vec![]).into()
-                }
-            } else {
-                column(vec![]).into()
-            },
-            if !meta.is_empty() {
-                row(meta).gap(SPACE_1).into()
-            } else {
-                column(vec![]).into()
-            },
-        ])
-        .gap(SPACE_1)
-        .grow()
-        .into()])
-        .fill_width()
-        .padding_x(SPACE_4)
-        .padding_y(SPACE_3)
-        .into(),
-        rect(BORDER).height(1.0).fill_width().into(),
-    ])
-    .gap(0.0)
-    .into()
+    raw.lines().filter_map(|line| {
+        let parts: Vec<&str> = line.splitn(4, '\x1f').collect();
+        if parts.len() < 4 { return None; }
+        Some(GitCommit {
+            sha: parts[0].to_string(),
+            author: parts[1].to_string(),
+            date_iso: parts[2].to_string(),
+            message: parts[3].to_string(),
+        })
+    }).collect()
 }
 
-// Repo row in the repositories tab
-fn repo_list_row(repo: &Repo) -> View {
-    let url = repo.html_url.clone();
-    let parts: Vec<&str> = repo.full_name.splitn(2, '/').collect();
-    let (owner, name) = if parts.len() == 2 {
-        (parts[0], parts[1])
+fn git_diff(repo: &Path, path: &str, staged: bool) -> Vec<DiffLine> {
+    let args = if staged {
+        vec!["diff", "--cached", "--unified=5", "--", path]
     } else {
-        ("", repo.full_name.as_str())
+        vec!["diff", "--unified=5", "--", path]
     };
-
-    let mut meta: Vec<View> = vec![];
-    if let Some(lang) = &repo.language {
-        meta.push(lang_dot(lang));
-        meta.push(text(lang, TEXT_XS).color(MUTED).into());
-    }
-    if repo.stargazers_count > 0 {
-        if !meta.is_empty() {
-            meta.push(hsp(SPACE_6));
-        }
-        meta.push(
-            row(vec![
-                image(asset("star.png")).size(12.0, 12.0).into(),
-                text(format_count(repo.stargazers_count), TEXT_XS)
-                    .color(MUTED)
-                    .into(),
-            ])
-            .gap(SPACE_1)
-            .into(),
-        );
-    }
-    if repo.forks_count > 0 {
-        if !meta.is_empty() {
-            meta.push(hsp(SPACE_6));
-        }
-        meta.push(
-            row(vec![
-                text("⑂", TEXT_XS).color(MUTED).into(),
-                text(format_count(repo.forks_count), TEXT_XS)
-                    .color(MUTED)
-                    .into(),
-            ])
-            .gap(SPACE_1)
-            .into(),
-        );
-    }
-    if let Some(updated) = &repo.updated_at {
-        if !meta.is_empty() {
-            meta.push(hsp(SPACE_6));
-        }
-        meta.push(
-            text(format!("Updated {}", short_date(updated)), TEXT_XS)
-                .color(MUTED)
-                .into(),
-        );
-    }
-
-    column(vec![
-        row(vec![column(vec![
-            row(vec![
-                text(owner, TEXT_SM).color(MUTED).into(),
-                text("/", TEXT_SM).color(SUBTLE).into(),
-                button(name, move || {
-                    let _ = open::that(&url);
-                })
-                .bg(Color::TRANSPARENT)
-                .hover_bg(Color::TRANSPARENT)
-                .text_color(BLUE)
-                .font_size(TEXT_SM)
-                .padding(0.0)
-                .into(),
-                if repo.fork {
-                    row(vec![
-                        hsp(SPACE_2),
-                        badge_colored("Fork", Color::rgba(1.0, 1.0, 1.0, 0.05), SUBTLE),
-                    ])
-                    .gap(0.0)
-                    .into()
-                } else {
-                    column(vec![]).into()
-                },
-                if repo.private {
-                    row(vec![
-                        hsp(SPACE_2),
-                        badge_colored("Private", Color::rgba(1.0, 1.0, 1.0, 0.06), MUTED),
-                    ])
-                    .gap(0.0)
-                    .into()
-                } else {
-                    column(vec![]).into()
-                },
-            ])
-            .gap(SPACE_2)
-            .align_center()
-            .no_wrap()
-            .into(),
-            if let Some(desc) = &repo.description {
-                if !desc.is_empty() {
-                    text(desc, TEXT_XS).color(MUTED).wrap().into()
-                } else {
-                    column(vec![]).into()
-                }
-            } else {
-                column(vec![]).into()
-            },
-            if !meta.is_empty() {
-                row(meta).gap(SPACE_1).into()
-            } else {
-                column(vec![]).into()
-            },
-        ])
-        .gap(SPACE_1)
-        .grow()
-        .into()])
-        .padding_x(SPACE_4)
-        .padding_y(SPACE_3)
-        .fill_width()
-        .into(),
-        rect(BORDER).height(1.0).fill_width().into(),
-    ])
-    .gap(0.0)
-    .into()
-}
-
-fn notif_row(n: &Notification) -> View {
-    let (kind_label, kind_color, kind_bg) = match n.subject.kind.as_str() {
-        "PullRequest" => ("PR", GREEN, Color::rgba(0.247, 0.722, 0.314, 0.12)),
-        "Issue" => ("Issue", ORANGE, Color::rgba(0.859, 0.427, 0.169, 0.12)),
-        "Release" => ("Release", BLUE, Color::rgba(0.345, 0.651, 1.000, 0.12)),
-        "Discussion" => ("Discussion", PURPLE, Color::rgba(0.686, 0.431, 0.988, 0.12)),
-        other => (other, MUTED, Color::rgba(1.0, 1.0, 1.0, 0.05)),
+    let raw = match git(repo, &args) {
+        Ok(s) => s,
+        Err(_) => return vec![],
     };
-
-    let dot_color = if n.unread { BLUE } else { Color::TRANSPARENT };
-    let row_bg = if n.unread {
-        Color::rgba(0.345, 0.651, 1.0, 0.04)
-    } else {
-        Color::TRANSPARENT
-    };
-
-    column(vec![
-        row(vec![
-            // Unread dot
-            column(vec![rect(dot_color)
-                .width(8.0)
-                .height(8.0)
-                .radius(4.0)
-                .into()])
-            .width(20.0)
-            .align_center()
-            .justify_center()
-            .into(),
-            // Type badge
-            badge_colored(kind_label, kind_bg, kind_color),
-            // Content
-            column(vec![
-                row(vec![
-                    text(&n.repository.full_name, TEXT_XS).color(MUTED).into(),
-                    spacer(),
-                    if let Some(ts) = &n.updated_at {
-                        text(short_date(ts), TEXT_XS).color(SUBTLE).into()
-                    } else {
-                        column(vec![]).into()
-                    },
-                ])
-                .fill_width()
-                .into(),
-                text(&n.subject.title, TEXT_SM).color(TEXT).wrap().into(),
-                text(reason_label(&n.reason), TEXT_XS).color(SUBTLE).into(),
-            ])
-            .gap(SPACE_1)
-            .grow()
-            .into(),
-        ])
-        .gap(SPACE_3)
-        .padding_x(SPACE_4)
-        .padding_y(SPACE_3)
-        .fill_width()
-        .bg(row_bg)
-        .into(),
-        rect(BORDER).height(1.0).fill_width().into(),
-    ])
-    .gap(0.0)
-    .into()
+    parse_diff(&raw)
 }
 
-fn pr_row(pr: &PullRequest) -> View {
-    let url = pr.html_url.clone();
-    let repo = pr
-        .repository_url
-        .strip_prefix("https://api.github.com/repos/")
-        .unwrap_or(&pr.repository_url);
-
-    let is_draft = pr.draft.unwrap_or(false);
-    let (status_color, status_bg, status_label) = if is_draft {
-        (MUTED, Color::rgba(1.0, 1.0, 1.0, 0.06), "Draft")
-    } else if pr.state == "open" {
-        (GREEN, Color::rgba(0.247, 0.722, 0.314, 0.12), "Open")
-    } else if pr.state == "merged" {
-        (PURPLE, Color::rgba(0.686, 0.431, 0.988, 0.12), "Merged")
-    } else {
-        (RED, Color::rgba(0.953, 0.369, 0.369, 0.12), "Closed")
-    };
-
-    column(vec![
-        row(vec![
-            // PR icon circle
-            column(vec![text("⤴", 13.0).color(status_color).into()])
-                .width(28.0)
-                .height(28.0)
-                .bg(status_bg)
-                .border(
-                    Color::rgba(status_color.r, status_color.g, status_color.b, 0.3),
-                    1.0,
-                )
-                .radius(14.0)
-                .align_center()
-                .justify_center()
-                .into(),
-            column(vec![
-                row(vec![
-                    text(repo, TEXT_XS).color(MUTED).into(),
-                    text(format!("  #{}", pr.number), TEXT_XS)
-                        .color(SUBTLE)
-                        .into(),
-                    spacer(),
-                    badge_colored(status_label, status_bg, status_color),
-                ])
-                .fill_width()
-                .into(),
-                button(&pr.title, move || {
-                    let _ = open::that(&url);
-                })
-                .bg(Color::TRANSPARENT)
-                .hover_bg(Color::TRANSPARENT)
-                .text_color(TEXT)
-                .font_size(TEXT_SM)
-                .padding(0.0)
-                .into(),
-                row(vec![
-                    text(format!("by @{}", pr.user.login), TEXT_XS)
-                        .color(MUTED)
-                        .into(),
-                    if let Some(c) = pr.comments {
-                        if c > 0 {
-                            row(vec![
-                                hsp(SPACE_4),
-                                text(
-                                    format!("{} comment{}", c, if c == 1 { "" } else { "s" }),
-                                    TEXT_XS,
-                                )
-                                .color(SUBTLE)
-                                .into(),
-                            ])
-                            .gap(0.0)
-                            .into()
-                        } else {
-                            column(vec![]).into()
-                        }
-                    } else {
-                        column(vec![]).into()
-                    },
-                ])
-                .into(),
-            ])
-            .gap(SPACE_1)
-            .grow()
-            .into(),
-        ])
-        .gap(SPACE_3)
-        .padding_x(SPACE_4)
-        .padding_y(SPACE_3)
-        .fill_width()
-        .into(),
-        rect(BORDER).height(1.0).fill_width().into(),
-    ])
-    .gap(0.0)
-    .into()
-}
-
-// --- Helpers ---
-
-fn sp(h: f32) -> View {
-    rect(Color::TRANSPARENT).width(1.0).height(h).into()
-}
-
-fn hsp(w: f32) -> View {
-    rect(Color::TRANSPARENT).width(w).height(1.0).into()
-}
-
-fn format_count(n: u32) -> String {
-    if n >= 1_000 {
-        format!("{:.1}k", n as f32 / 1000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-fn short_date(iso: &str) -> String {
-    // "2024-11-03T14:22:00Z" → "Nov 3"
-    let months = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let parts: Vec<&str> = iso.split('T').next().unwrap_or("").split('-').collect();
-    if parts.len() == 3 {
-        let month = parts[1].parse::<usize>().unwrap_or(1).saturating_sub(1);
-        let day = parts[2].trim_start_matches('0');
-        format!("{} {}", months.get(month).unwrap_or(&"?"), day)
-    } else {
-        iso[..iso.len().min(10)].to_string()
-    }
-}
-
-fn reason_label(r: &str) -> &str {
-    match r {
-        "assign" => "Assigned to you",
-        "author" => "You authored this",
-        "comment" => "You commented",
-        "mention" => "You were mentioned",
-        "review_requested" => "Review requested",
-        "subscribed" => "Subscribed",
-        "team_mention" => "Your team was mentioned",
-        _ => r,
-    }
-}
-
-// Small colored dot indicating a programming language
-fn lang_dot(lang: &str) -> View {
-    let color = lang_color(lang);
-    rect(color).width(10.0).height(10.0).radius(5.0).into()
-}
-
-fn lang_color(lang: &str) -> Color {
-    match lang {
-        "Rust" => Color::rgb(0.871, 0.298, 0.188),
-        "TypeScript" => Color::rgb(0.173, 0.561, 0.776),
-        "JavaScript" => Color::rgb(0.945, 0.820, 0.157),
-        "Python" => Color::rgb(0.220, 0.451, 0.659),
-        "Go" => Color::rgb(0.004, 0.643, 0.788),
-        "Swift" => Color::rgb(0.980, 0.361, 0.243),
-        "Kotlin" => Color::rgb(0.490, 0.349, 0.761),
-        "C++" => Color::rgb(0.361, 0.506, 0.722),
-        "C" => Color::rgb(0.341, 0.463, 0.631),
-        "Java" => Color::rgb(0.702, 0.408, 0.188),
-        "Ruby" => Color::rgb(0.702, 0.086, 0.086),
-        "Dart" => Color::rgb(0.208, 0.592, 0.827),
-        "C#" => Color::rgb(0.373, 0.153, 0.647),
-        "HTML" => Color::rgb(0.890, 0.361, 0.161),
-        "CSS" => Color::rgb(0.361, 0.408, 0.780),
-        "Shell" => Color::rgb(0.557, 0.686, 0.212),
-        "Nix" => Color::rgb(0.302, 0.498, 0.761),
-        _ => MUTED,
-    }
-}
-
-// Hack: ButtonView has no border method — we use a workaround
-trait ButtonBorderHack {
-    fn border_not_supported_use_container_border(self) -> Self;
-}
-impl ButtonBorderHack for core_glyph::ButtonView {
-    fn border_not_supported_use_container_border(self) -> Self {
-        self
-    }
-}
-
-// --- App shell ---
-
-struct GlyphGitHub {
-    login: Signal<Option<Arc<LoginScreen>>>,
-    dashboard: Signal<Option<Arc<DashboardScreen>>>,
-}
-
-impl GlyphGitHub {
-    fn new() -> Self {
-        let login: Signal<Option<Arc<LoginScreen>>> = Signal::new(None);
-        let dashboard: Signal<Option<Arc<DashboardScreen>>> = Signal::new(None);
-        let (lt, dt) = (login.clone(), dashboard.clone());
-        thread::spawn(move || {
-            if let Some(token) = load_token() {
-                dt.set(Some(Arc::new(DashboardScreen::new(token))));
-            } else {
-                let screen = Arc::new(LoginScreen::new());
-                let tok = screen.token_out.clone();
-                lt.set(Some(screen));
-                thread::spawn(move || loop {
-                    thread::sleep(std::time::Duration::from_millis(500));
-                    if let Some(token) = tok.get() {
-                        lt.set(None);
-                        dt.set(Some(Arc::new(DashboardScreen::new(token))));
-                        break;
+fn parse_diff(raw: &str) -> Vec<DiffLine> {
+    let mut lines = vec![];
+    let mut old_n = 0u32;
+    let mut new_n = 0u32;
+    for line in raw.lines() {
+        if line.starts_with("@@") {
+            // parse @@ -a,b +c,d @@
+            if let Some(rest) = line.split_once(" -") {
+                if let Some((old_part, rem)) = rest.1.split_once(' ') {
+                    let old_start: u32 = old_part.split(',').next()
+                        .and_then(|s| s.parse().ok()).unwrap_or(1);
+                    if let Some(new_part) = rem.strip_prefix('+') {
+                        let new_start: u32 = new_part.split(',').next()
+                            .and_then(|s| s.parse().ok()).unwrap_or(1);
+                        old_n = old_start;
+                        new_n = new_start;
                     }
-                });
+                }
             }
-        });
-        Self { login, dashboard }
+            lines.push(DiffLine {
+                kind: DiffLineKind::HunkHeader,
+                old_num: None, new_num: None,
+                content: line.to_string(),
+            });
+        } else if line.starts_with('+') && !line.starts_with("+++") {
+            lines.push(DiffLine {
+                kind: DiffLineKind::Added,
+                old_num: None, new_num: Some(new_n),
+                content: line[1..].to_string(),
+            });
+            new_n += 1;
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            lines.push(DiffLine {
+                kind: DiffLineKind::Deleted,
+                old_num: Some(old_n), new_num: None,
+                content: line[1..].to_string(),
+            });
+            old_n += 1;
+        } else if !line.starts_with("diff ") && !line.starts_with("index ")
+               && !line.starts_with("---") && !line.starts_with("+++") {
+            let content = if line.starts_with(' ') { line[1..].to_string() } else { line.to_string() };
+            lines.push(DiffLine {
+                kind: DiffLineKind::Context,
+                old_num: Some(old_n), new_num: Some(new_n),
+                content,
+            });
+            old_n += 1;
+            new_n += 1;
+        }
     }
+    lines
+}
 
-    fn render(&self) -> View {
-        if let Some(dash) = self.dashboard.get() {
-            return dash.render();
-        }
-        if let Some(login) = self.login.get() {
-            return login.render();
-        }
-        column(vec![
-            sp(SPACE_12),
-            row(vec![
-                rect(BLUE).width(6.0).height(6.0).radius(3.0).into(),
-                text("Starting…", TEXT_SM).color(MUTED).into(),
-            ])
-            .gap(SPACE_2)
-            .into(),
-        ])
-        .padding(SPACE_6)
-        .align_center()
-        .fill_width()
-        .into()
+fn git_branches(repo: &Path) -> Vec<GitBranch> {
+    let raw = match git(repo, &["branch", "-vv", "--all"]) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    raw.lines().filter_map(|line| {
+        let current = line.starts_with('*');
+        let trimmed = line.trim_start_matches(['*', ' ']);
+        let name = trimmed.split_whitespace().next()?.to_string();
+        let is_remote = name.starts_with("remotes/");
+        let clean_name = name.trim_start_matches("remotes/").to_string();
+        // parse ahead/behind from [origin/main: ahead 2, behind 1]
+        let ahead = parse_num_after(line, "ahead ");
+        let behind = parse_num_after(line, "behind ");
+        Some(GitBranch { name: clean_name, is_current: current, is_remote, ahead, behind })
+    }).collect()
+}
+
+fn parse_num_after(s: &str, pat: &str) -> u32 {
+    if let Some(idx) = s.find(pat) {
+        s[idx + pat.len()..].split_whitespace().next()
+            .and_then(|n| n.trim_matches(|c: char| !c.is_numeric()).parse().ok())
+            .unwrap_or(0)
+    } else { 0 }
+}
+
+fn git_stage(repo: &Path, path: &str) {
+    let _ = git(repo, &["add", "--", path]);
+}
+
+fn git_unstage(repo: &Path, path: &str) {
+    let _ = git(repo, &["reset", "HEAD", "--", path]);
+}
+
+fn git_commit(repo: &Path, summary: &str, body: &str) -> Result<(), String> {
+    let msg = if body.is_empty() {
+        summary.to_string()
+    } else {
+        format!("{}\n\n{}", summary, body)
+    };
+    git(repo, &["commit", "-m", &msg]).map(|_| ())
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
+
+fn relative_date(iso: &str) -> String {
+    // iso: "2024-05-18 12:34:56 +0000" — parse date part only
+    let date_part = iso.split(' ').next().unwrap_or(iso);
+    let parts: Vec<u32> = date_part.split('-').filter_map(|s| s.parse().ok()).collect();
+    if parts.len() < 3 { return iso.to_string(); }
+    // Rough approximation using wall-clock date comparison is hard without chrono.
+    // Return the date string formatted nicely.
+    format!("{} {}, {}", month_name(parts[1]), parts[2], parts[0])
+}
+
+fn month_name(m: u32) -> &'static str {
+    match m {
+        1=>"Jan",2=>"Feb",3=>"Mar",4=>"Apr",5=>"May",6=>"Jun",
+        7=>"Jul",8=>"Aug",9=>"Sep",10=>"Oct",11=>"Nov",12=>"Dec",_=>"?"
     }
 }
+
+fn trunc(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { s.to_string() }
+    else { format!("{}…", &s[..s.char_indices().nth(max).map(|(i,_)| i).unwrap_or(s.len())]) }
+}
+
+fn open_repo_picker() -> Option<PathBuf> {
+    // Use `open` CLI or system dialog — fallback: env current dir
+    let cwd = std::env::current_dir().ok()?;
+    if cwd.join(".git").exists() { Some(cwd) } else { None }
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let app = GlyphGitHub::new();
+    let repo_path = open_repo_picker();
+    let theme = github_dark();
+
+    let state: Signal<AppState> = Signal::new(AppState::new(repo_path.clone()));
+
+    // Initial load
+    if let Some(ref rp) = repo_path {
+        let rp = rp.clone();
+        let s = state.clone();
+        thread::spawn(move || {
+            let mut st = s.get();
+            st.loading = true;
+            s.set(st.clone());
+            st.current_branch = git_current_branch(&rp);
+            let (staged, unstaged) = git_status(&rp);
+            st.staged = staged;
+            st.unstaged = unstaged;
+            st.commits = git_log(&rp);
+            st.branches = git_branches(&rp);
+            st.loading = false;
+            s.set(st);
+        });
+    }
+
+    let scroll_y = Signal::new(0.0f32);
+    let max_scroll = Signal::new((-1.0f32, -1.0f32));
+
     App::run(
-        move |_opener, _closer| {
-            let theme = gh_theme();
-            let view = app.render();
-            (theme, view)
+        move |_opener: &WindowOpener, _closer: &WindowCloser| {
+            let t = github_dark();
+            let view = build_ui(state.clone(), scroll_y.clone(), max_scroll.clone(), &t);
+            (t, view)
         },
-        gh_theme(),
-        "Glyph for GitHub",
+        theme,
+        "Glyph Git",
         1280.0,
         800.0,
     );
+}
+
+fn github_dark() -> Theme {
+    ui_glyph::github_dark_theme()
+}
+
+// ── UI Build ───────────────────────────────────────────────────────────────────
+
+fn build_ui(
+    state: Signal<AppState>,
+    scroll_y: Signal<f32>,
+    max_scroll: Signal<(f32, f32)>,
+    theme: &Theme,
+) -> View {
+    let st = state.get();
+
+    // ── Error banner ───────────────────────────────────────────────────────────
+    let error_banner: View = if let Some(ref err) = st.error {
+        let s2 = state.clone();
+        row(vec![
+            column(vec![]).width(3.0).bg(RED).into(), // 3px left accent strip
+            hgap(SPACE_3),
+            text(trunc(err, 80), TEXT_SM).color(RED).into(),
+            spacer(),
+            button_view(
+                row(vec![icon_close_outline(FG_MUTED, 14.0)]).align_center().justify_center().into(),
+                move || { let mut st = s2.get(); st.error = None; s2.set(st); },
+            ).bg(Color::TRANSPARENT).hover_bg(Color::rgba(1.,1.,1.,0.06))
+             .width(28.0).height(28.0).radius(RADIUS_MD).into(),
+            hgap(SPACE_2),
+        ])
+        .gap(0.0)
+        .height(32.0)
+        .fill_width()
+        .bg(Color::rgb(0.176, 0.082, 0.082)) // #2D1515
+        .align_center()
+        .into()
+    } else {
+        column(vec![]).into()
+    };
+
+    // ── Topbar (40px) ──────────────────────────────────────────────────────────
+    let topbar = render_topbar(&st, theme, state.clone());
+
+    // ── Main body: nav + sidebar + canvas ─────────────────────────────────────
+    let nav_strip  = render_nav(&st, theme, state.clone());
+    let sidebar    = render_sidebar(&st, theme, state.clone(), scroll_y.clone(), max_scroll.clone());
+    let diff_canvas = render_diff_canvas(&st, theme, state.clone(), scroll_y.clone(), max_scroll.clone());
+
+    let body = row(vec![nav_strip, sidebar, diff_canvas])
+        .gap(0.0)
+        .fill_width()
+        .grow()
+        .into();
+
+    column(vec![error_banner, topbar, body])
+        .gap(0.0)
+        .fill_width()
+        .fill_height()
+        .bg(BG_BASE)
+        .into()
+}
+
+// ── Topbar ─────────────────────────────────────────────────────────────────────
+
+fn render_topbar(st: &AppState, _theme: &Theme, state: Signal<AppState>) -> View {
+    let branch = if st.current_branch.is_empty() {
+        "—".to_string()
+    } else {
+        st.current_branch.clone()
+    };
+
+    let repo_name = st.repo_path.as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "No repository".to_string());
+
+    // Refresh button
+    let s2 = state.clone();
+    let repo = st.repo_path.clone();
+    let refresh_btn = button_view(
+        row(vec![icon_refresh_outline(FG_MUTED, 14.0)]).align_center().justify_center().into(),
+        move || {
+            if let Some(ref rp) = repo {
+                let rp = rp.clone();
+                let s = s2.clone();
+                thread::spawn(move || {
+                    let mut st = s.get();
+                    st.loading = true;
+                    s.set(st.clone());
+                    st.current_branch = git_current_branch(&rp);
+                    let (staged, unstaged) = git_status(&rp);
+                    st.staged = staged;
+                    st.unstaged = unstaged;
+                    st.commits = git_log(&rp);
+                    st.branches = git_branches(&rp);
+                    st.loading = false;
+                    s.set(st);
+                });
+            }
+        },
+    )
+    .bg(Color::TRANSPARENT).hover_bg(BG_ELEVATED)
+    .width(32.0).height(32.0).radius(RADIUS_MD)
+    .into();
+
+    row(vec![
+        hgap(SPACE_4),
+        icon_git_branch_outline(FG_MUTED, 14.0),
+        hgap(SPACE_2),
+        text(&repo_name, TEXT_SM).color(FG).weight(FontWeight::Bold).into(),
+        hgap(SPACE_3),
+        column(vec![]).width(1.0).height(20.0).bg(BORDER).into(), // separator
+        hgap(SPACE_3),
+        icon_git_branch_outline(FG_MUTED, 12.0),
+        hgap(SPACE_1),
+        text(&branch, TEXT_SM).color(FG_MUTED).family(FontFamily::Monospace).into(),
+        spacer(),
+        if st.loading {
+            text("Fetching…", TEXT_XS).color(FG_MUTED).into()
+        } else {
+            column(vec![]).into()
+        },
+        hgap(SPACE_2),
+        refresh_btn,
+        hgap(SPACE_3),
+    ])
+    .gap(0.0)
+    .height(40.0)
+    .fill_width()
+    .bg(BG_SURFACE)
+    .align_center()
+    .border(BORDER, 1.0) // bottom border via border
+    .into()
+}
+
+// ── Nav strip (48px wide) ──────────────────────────────────────────────────────
+
+fn render_nav(st: &AppState, _theme: &Theme, state: Signal<AppState>) -> View {
+    let tab = st.tab.clone();
+
+    let mk_nav_btn = |icon: View, this_tab: SidebarTab, s: Signal<AppState>| -> View {
+        let active = tab == this_tab;
+        let bg = if active { BG_ELEVATED } else { Color::TRANSPARENT };
+        let accent_bar: View = if active {
+            column(vec![]).width(2.0).height(28.0).bg(ACCENT).into()
+        } else {
+            column(vec![]).width(2.0).into()
+        };
+        row(vec![
+            accent_bar,
+            button_view(
+                column(vec![icon]).width(32.0).height(32.0).align_center().justify_center().into(),
+                move || { let mut st = s.get(); st.tab = this_tab.clone(); s.set(st); },
+            ).bg(bg).hover_bg(BG_ELEVATED).width(40.0).height(40.0).radius(RADIUS_MD).into(),
+            hgap(SPACE_1),
+        ])
+        .gap(0.0)
+        .align_center()
+        .into()
+    };
+
+    let s1 = state.clone();
+    let s2 = state.clone();
+    let s3 = state.clone();
+
+    column(vec![
+        gap(SPACE_4),
+        mk_nav_btn(icon_code_slash_outline(if tab == SidebarTab::Changes { FG } else { FG_MUTED }, 18.0), SidebarTab::Changes, s1),
+        gap(SPACE_1),
+        mk_nav_btn(icon_git_commit_outline(if tab == SidebarTab::History { FG } else { FG_MUTED }, 18.0), SidebarTab::History, s2),
+        gap(SPACE_1),
+        mk_nav_btn(icon_git_branch_outline(if tab == SidebarTab::Branches { FG } else { FG_MUTED }, 18.0), SidebarTab::Branches, s3),
+        spacer(),
+        column(vec![
+            icon_settings_outline(FG_MUTED, 18.0),
+        ]).width(40.0).height(40.0).align_center().justify_center().into(),
+        gap(SPACE_2),
+    ])
+    .gap(0.0)
+    .width(48.0)
+    .fill_height()
+    .bg(BG_SURFACE)
+    .border(BORDER, 1.0)
+    .into()
+}
+
+// ── Sidebar (240px) ────────────────────────────────────────────────────────────
+
+fn render_sidebar(
+    st: &AppState,
+    theme: &Theme,
+    state: Signal<AppState>,
+    scroll_y: Signal<f32>,
+    max_scroll: Signal<(f32, f32)>,
+) -> View {
+    // Tab bar
+    let tab_bar = render_tab_bar(st, state.clone());
+
+    // Active panel
+    let panel: View = match st.tab {
+        SidebarTab::Changes  => render_changes_panel(st, theme, state.clone()),
+        SidebarTab::History  => render_history_panel(st, theme, state.clone(), scroll_y.clone(), max_scroll.clone()),
+        SidebarTab::Branches => render_branches_panel(st, theme, state.clone()),
+    };
+
+    // Commit panel pinned at bottom (only for Changes tab)
+    let commit_panel: View = if st.tab == SidebarTab::Changes {
+        render_commit_panel(st, state.clone())
+    } else {
+        column(vec![]).into()
+    };
+
+    column(vec![tab_bar, panel, commit_panel])
+        .gap(0.0)
+        .width(240.0)
+        .fill_height()
+        .bg(BG_SURFACE)
+        .border(BORDER, 1.0)
+        .into()
+}
+
+fn render_tab_bar(st: &AppState, state: Signal<AppState>) -> View {
+    let tab = st.tab.clone();
+
+    let mk_tab = |label: &str, this_tab: SidebarTab, s: Signal<AppState>| -> View {
+        let active = tab == this_tab;
+        let fg = if active { FG } else { FG_MUTED };
+        let underline: View = if active {
+            column(vec![]).height(2.0).fill_width().bg(ACCENT).into()
+        } else {
+            column(vec![]).height(2.0).into()
+        };
+        button_view(
+            column(vec![
+                text(label, TEXT_XS).color(fg).weight(FontWeight::Bold).into(),
+                underline,
+            ])
+            .gap(0.0)
+            .width(80.0)
+            .height(32.0)
+            .align_center()
+            .justify_center()
+            .into(),
+            move || { let mut st = s.get(); st.tab = this_tab.clone(); s.set(st); },
+        )
+        .bg(Color::TRANSPARENT)
+        .hover_bg(BG_ELEVATED)
+        .width(80.0).height(32.0)
+        .into()
+    };
+
+    let s1 = state.clone();
+    let s2 = state.clone();
+    let s3 = state.clone();
+
+    row(vec![
+        mk_tab("CHANGES",  SidebarTab::Changes,  s1),
+        mk_tab("HISTORY",  SidebarTab::History,  s2),
+        mk_tab("BRANCHES", SidebarTab::Branches, s3),
+    ])
+    .gap(0.0)
+    .height(32.0)
+    .fill_width()
+    .bg(BG_SURFACE)
+    .border(BORDER, 1.0)
+    .into()
+}
+
+// ── Changes panel ──────────────────────────────────────────────────────────────
+
+fn render_changes_panel(st: &AppState, _theme: &Theme, state: Signal<AppState>) -> View {
+    if st.repo_path.is_none() {
+        return column(vec![
+            gap(SPACE_6),
+            text("No repository open", TEXT_SM).color(FG_MUTED).into(),
+        ])
+        .align_center()
+        .fill_width()
+        .grow()
+        .into();
+    }
+
+    let has_unstaged = !st.unstaged.is_empty();
+    let has_staged   = !st.staged.is_empty();
+
+    if !has_unstaged && !has_staged {
+        return column(vec![
+            gap(SPACE_6),
+            icon_checkmark_outline(GREEN, 24.0),
+            gap(SPACE_2),
+            text("Nothing to commit", TEXT_SM).color(FG_MUTED).into(),
+            text("Working tree clean", TEXT_XS).color(FG_MUTED).into(),
+        ])
+        .align_center()
+        .fill_width()
+        .grow()
+        .into();
+    }
+
+    let mut rows: Vec<View> = vec![];
+
+    // Unstaged section
+    if has_unstaged {
+        rows.push(section_header(&format!("UNSTAGED  ({})", st.unstaged.len())));
+        for (i, f) in st.unstaged.iter().enumerate() {
+            let file = f.clone();
+            let file_path_cb = f.path.clone();
+            let s = state.clone();
+            let repo = st.repo_path.clone();
+            let selected = st.selected_file_idx == Some(i);
+
+            rows.push(file_row(file, selected, false, move || {
+                // Stage on checkbox click
+                if let Some(ref rp) = repo {
+                    git_stage(rp, &file_path_cb);
+                }
+                let mut st = s.get();
+                let (staged, unstaged) = git_status(st.repo_path.as_ref().unwrap());
+                st.staged = staged; st.unstaged = unstaged;
+                st.max_scroll_reset();
+                s.set(st);
+            }, {
+                let s2 = state.clone();
+                let idx = i;
+                let repo2 = st.repo_path.clone();
+                let fp = f.path.clone();
+                let is_staged = false;
+                move || {
+                    let mut st = s2.get();
+                    st.selected_file_idx = Some(idx);
+                    st.active_file = Some(fp.clone());
+                    if let Some(ref rp) = repo2 {
+                        st.diff_lines = git_diff(rp, &fp, is_staged);
+                    }
+                    st.focus = FocusRegion::DiffCanvas;
+                    s2.set(st);
+                }
+            }));
+        }
+    }
+
+    // Staged section
+    if has_staged {
+        rows.push(section_header(&format!("STAGED  ({})", st.staged.len())));
+        let offset = st.unstaged.len();
+        for (i, f) in st.staged.iter().enumerate() {
+            let file = f.clone();
+            let file_path_cb = f.path.clone();
+            let s = state.clone();
+            let repo = st.repo_path.clone();
+            let selected = st.selected_file_idx == Some(offset + i);
+
+            rows.push(file_row(file, selected, true, move || {
+                // Unstage on checkbox click
+                if let Some(ref rp) = repo {
+                    git_unstage(rp, &file_path_cb);
+                }
+                let mut st = s.get();
+                let (staged, unstaged) = git_status(st.repo_path.as_ref().unwrap());
+                st.staged = staged; st.unstaged = unstaged;
+                st.max_scroll_reset();
+                s.set(st);
+            }, {
+                let s2 = state.clone();
+                let idx = offset + i;
+                let repo2 = st.repo_path.clone();
+                let fp = f.path.clone();
+                let is_staged = true;
+                move || {
+                    let mut st = s2.get();
+                    st.selected_file_idx = Some(idx);
+                    st.active_file = Some(fp.clone());
+                    if let Some(ref rp) = repo2 {
+                        st.diff_lines = git_diff(rp, &fp, is_staged);
+                    }
+                    st.focus = FocusRegion::DiffCanvas;
+                    s2.set(st);
+                }
+            }));
+        }
+    }
+
+    column(rows)
+        .gap(0.0)
+        .fill_width()
+        .grow()
+        .clip()
+        .into()
+}
+
+fn section_header(label: &str) -> View {
+    row(vec![
+        hgap(SPACE_3),
+        text(label, TEXT_XS).color(FG_MUTED).weight(FontWeight::Bold).into(),
+        spacer(),
+    ])
+    .gap(0.0)
+    .height(24.0)
+    .fill_width()
+    .bg(BG_SURFACE)
+    .align_center()
+    .border(BORDER, 1.0)
+    .into()
+}
+
+fn file_row(
+    file: GitFile,
+    selected: bool,
+    is_staged: bool,
+    on_checkbox: impl Fn() + 'static,
+    on_select: impl Fn() + 'static,
+) -> View {
+    let status_color = file.status.color();
+    let status_label = file.status.label();
+    let filename = Path::new(&file.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file.path.clone());
+    let filename = trunc(&filename, 24);
+
+    let bg = if selected { DIFF_HUNK_BG } else { Color::TRANSPARENT };
+    let left_bar: View = if selected {
+        column(vec![]).width(2.0).fill_height().bg(ACCENT).into()
+    } else {
+        column(vec![]).width(2.0).into()
+    };
+
+    // Checkbox — filled square if staged, outline if not
+    let checkbox: View = button_view(
+        column(vec![
+            if is_staged {
+                icon_checkmark_outline(Color::rgb(1., 1., 1.), 10.0)
+            } else {
+                column(vec![]).into()
+            },
+        ])
+        .width(14.0).height(14.0)
+        .align_center().justify_center()
+        .bg(if is_staged { ACCENT } else { Color::TRANSPARENT })
+        .border(if is_staged { ACCENT } else { BORDER }, 1.0)
+        .radius(2.0)
+        .into(),
+        on_checkbox,
+    )
+    .bg(Color::TRANSPARENT).hover_bg(Color::TRANSPARENT)
+    .width(20.0).height(22.0)
+    .into();
+
+    let row_content = row(vec![
+        left_bar,
+        checkbox,
+        // filename — grows
+        button(trunc(&filename, 22), on_select)
+            .bg(Color::TRANSPARENT).hover_bg(Color::TRANSPARENT)
+            .text_color(FG).font_size(TEXT_XS)
+            .padding(0.0)
+            .into(),
+        spacer(),
+        // status chip
+        text(status_label, TEXT_XS).color(status_color).weight(FontWeight::Bold).into(),
+        hgap(SPACE_2),
+    ])
+    .gap(0.0)
+    .height(22.0)
+    .fill_width()
+    .bg(bg)
+    .align_center()
+    .into();
+
+    column(vec![
+        row_content,
+        column(vec![]).height(1.0).fill_width().bg(BORDER).into(),
+    ])
+    .gap(0.0)
+    .into()
+}
+
+// ── History panel ──────────────────────────────────────────────────────────────
+
+fn render_history_panel(
+    st: &AppState,
+    _theme: &Theme,
+    _state: Signal<AppState>,
+    scroll_y: Signal<f32>,
+    max_scroll: Signal<(f32, f32)>,
+) -> View {
+    if st.commits.is_empty() {
+        return column(vec![
+            gap(SPACE_6),
+            text("No commits yet", TEXT_SM).color(FG_MUTED).into(),
+        ])
+        .align_center()
+        .fill_width()
+        .grow()
+        .into();
+    }
+
+    let rows: Vec<View> = st.commits.iter().map(|c| commit_row(c)).collect();
+
+    scroll(
+        column(rows).gap(0.0).fill_width().into(),
+        Signal::new(0.0),
+        scroll_y,
+        max_scroll,
+    )
+    .fill_width()
+    .grow()
+    .into()
+}
+
+fn commit_row(c: &GitCommit) -> View {
+    let sha   = c.short_sha().to_string();
+    let msg   = trunc(c.message_first_line(), 26);
+    let author = trunc(&c.author, 18);
+    let date  = c.relative_time();
+
+    column(vec![
+        row(vec![
+            hgap(SPACE_3),
+            icon_git_commit_outline(FG_MUTED, 12.0),
+            hgap(SPACE_2),
+            column(vec![
+                text(&msg, TEXT_XS).color(FG).into(),
+                row(vec![
+                    text(&author, TEXT_XS).color(FG_MUTED).into(),
+                    hgap(SPACE_2),
+                    text(&date, TEXT_XS).color(FG_MUTED).into(),
+                    spacer(),
+                    text(&sha, TEXT_XS).color(FG_MUTED).family(FontFamily::Monospace).into(),
+                    hgap(SPACE_2),
+                ])
+                .gap(0.0)
+                .fill_width()
+                .into(),
+            ])
+            .gap(SPACE_1)
+            .grow()
+            .into(),
+        ])
+        .gap(0.0)
+        .fill_width()
+        .height(40.0)
+        .align_center()
+        .padding_y(SPACE_2)
+        .into(),
+        column(vec![]).height(1.0).fill_width().bg(BORDER).into(),
+    ])
+    .gap(0.0)
+    .into()
+}
+
+// ── Branches panel ─────────────────────────────────────────────────────────────
+
+fn render_branches_panel(st: &AppState, _theme: &Theme, _state: Signal<AppState>) -> View {
+    if st.branches.is_empty() {
+        return column(vec![
+            gap(SPACE_6),
+            text("No branches", TEXT_SM).color(FG_MUTED).into(),
+        ])
+        .align_center()
+        .fill_width()
+        .grow()
+        .into();
+    }
+
+    let local: Vec<&GitBranch> = st.branches.iter().filter(|b| !b.is_remote).collect();
+    let remote: Vec<&GitBranch> = st.branches.iter().filter(|b| b.is_remote).collect();
+
+    let mut rows: Vec<View> = vec![];
+
+    if !local.is_empty() {
+        rows.push(section_header(&format!("LOCAL  ({})", local.len())));
+        for b in &local {
+            rows.push(branch_row(b));
+        }
+    }
+    if !remote.is_empty() {
+        rows.push(section_header(&format!("REMOTE  ({})", remote.len())));
+        for b in &remote {
+            rows.push(branch_row(b));
+        }
+    }
+
+    column(rows)
+        .gap(0.0)
+        .fill_width()
+        .grow()
+        .clip()
+        .into()
+}
+
+fn branch_row(b: &GitBranch) -> View {
+    let name = trunc(&b.name, 26);
+    let fg = if b.is_current { FG } else { FG_MUTED };
+    let icon: View = if b.is_current {
+        icon_chevron_forward_outline(GREEN, 12.0)
+    } else {
+        icon_git_branch_outline(FG_MUTED, 12.0)
+    };
+
+    let tracking: View = if b.ahead > 0 || b.behind > 0 {
+        row(vec![
+            if b.ahead > 0 {
+                text(format!("↑{}", b.ahead), TEXT_XS).color(ACCENT).into()
+            } else { column(vec![]).into() },
+            if b.behind > 0 {
+                text(format!("↓{}", b.behind), TEXT_XS).color(AMBER).into()
+            } else { column(vec![]).into() },
+        ])
+        .gap(SPACE_1)
+        .into()
+    } else {
+        column(vec![]).into()
+    };
+
+    column(vec![
+        row(vec![
+            hgap(SPACE_3),
+            icon,
+            hgap(SPACE_2),
+            text(&name, TEXT_XS).color(fg).family(FontFamily::Monospace).into(),
+            spacer(),
+            tracking,
+            hgap(SPACE_2),
+        ])
+        .gap(0.0)
+        .height(22.0)
+        .fill_width()
+        .align_center()
+        .into(),
+        column(vec![]).height(1.0).fill_width().bg(BORDER).into(),
+    ])
+    .gap(0.0)
+    .into()
+}
+
+// ── Commit panel (pinned bottom, 80px / 140px expanded) ───────────────────────
+
+fn render_commit_panel(st: &AppState, state: Signal<AppState>) -> View {
+    let summary_sig: Signal<String> = {
+        let s = Signal::new(st.commit_summary.clone());
+        s
+    };
+    let body_sig: Signal<String> = Signal::new(st.commit_body.clone());
+    let expanded = st.commit_expanded;
+    let char_count = st.commit_summary.len();
+    let over_limit = char_count >= 72;
+    let counter_color = if over_limit { RED } else { FG_MUTED };
+    let has_staged = !st.staged.is_empty();
+
+    let s_sum = state.clone();
+    let s_exp = state.clone();
+    let s_commit = state.clone();
+    let s_push = state.clone();
+
+    // Summary input
+    let summary_input: View = {
+        let cur_val = st.commit_summary.clone();
+        let s = s_sum.clone();
+        row(vec![
+            text_input(summary_sig.clone(), Signal::new(true), Signal::new(0))
+                .placeholder("Summary (required)")
+                .font_size(TEXT_SM)
+                .bg(BG_BASE)
+                .text_color(FG)
+                .border_color(BORDER)
+                .on_change(move |v| {
+                    let mut st = s.get(); st.commit_summary = v; s.set(st);
+                })
+                .fill_width()
+                .into(),
+            text(format!("{}/72", char_count), TEXT_XS).color(counter_color).into(),
+            hgap(SPACE_2),
+        ])
+        .gap(0.0)
+        .height(40.0)
+        .fill_width()
+        .bg(BG_BASE)
+        .align_center()
+        .border(BORDER, 1.0)
+        .into()
+    };
+
+    // Body textarea (only when expanded)
+    let body_input: View = if expanded {
+        let s = state.clone();
+        text_input(body_sig.clone(), Signal::new(true), Signal::new(0))
+            .placeholder("Extended description…")
+            .font_size(TEXT_SM)
+            .bg(BG_BASE)
+            .text_color(FG)
+            .border_color(BORDER)
+            .on_change(move |v| {
+                let mut st = s.get(); st.commit_body = v; s.set(st);
+            })
+            .fill_width()
+            .into()
+    } else {
+        column(vec![]).into()
+    };
+
+    // Expand toggle
+    let expand_btn: View = {
+        let s = s_exp.clone();
+        button_view(
+            row(vec![
+                if expanded {
+                    icon_chevron_down_outline(FG_MUTED, 12.0)
+                } else {
+                    icon_chevron_forward_outline(FG_MUTED, 12.0)
+                },
+            ]).align_center().justify_center().into(),
+            move || { let mut st = s.get(); st.commit_expanded = !st.commit_expanded; s.set(st); },
+        )
+        .bg(Color::TRANSPARENT).hover_bg(BG_ELEVATED)
+        .width(24.0).height(24.0).radius(RADIUS_MD)
+        .into()
+    };
+
+    // Commit button
+    let commit_bg  = if has_staged { Color::rgb(0.137, 0.525, 0.212) } else { BG_ELEVATED }; // #238636
+    let commit_fg  = if has_staged { FG } else { FG_MUTED };
+    let summary_c  = st.commit_summary.clone();
+    let body_c     = st.commit_body.clone();
+    let repo_c     = st.repo_path.clone();
+    let commit_btn: View = button("Commit", move || {
+        if !has_staged || summary_c.is_empty() { return; }
+        if let Some(ref rp) = repo_c {
+            let _ = git_commit(rp, &summary_c, &body_c);
+            let mut st = s_commit.get();
+            let (staged, unstaged) = git_status(rp);
+            st.staged = staged; st.unstaged = unstaged;
+            st.commits = git_log(rp);
+            st.commit_summary = String::new();
+            st.commit_body = String::new();
+            st.commit_expanded = false;
+            st.max_scroll_reset();
+            s_commit.set(st);
+        }
+    })
+    .bg(commit_bg).hover_bg(if has_staged { Color::rgb(0.180, 0.627, 0.259) } else { BG_ELEVATED })
+    .text_color(commit_fg)
+    .font_size(TEXT_XS).padding(SPACE_3).radius(RADIUS_MD)
+    .grow()
+    .into();
+
+    let action_row = row(vec![
+        hgap(SPACE_2),
+        commit_btn,
+        hgap(SPACE_2),
+        expand_btn,
+        hgap(SPACE_1),
+    ])
+    .gap(0.0)
+    .height(40.0)
+    .fill_width()
+    .bg(BG_SURFACE)
+    .align_center()
+    .border(BORDER, 1.0)
+    .into();
+
+    column(vec![
+        column(vec![]).height(1.0).fill_width().bg(BORDER).into(),
+        body_input,
+        summary_input,
+        action_row,
+    ])
+    .gap(0.0)
+    .fill_width()
+    .into()
+}
+
+// ── Diff canvas ─────────────────────────────────────────────────────────────────
+
+fn render_diff_canvas(
+    st: &AppState,
+    _theme: &Theme,
+    state: Signal<AppState>,
+    scroll_y: Signal<f32>,
+    max_scroll: Signal<(f32, f32)>,
+) -> View {
+    if st.repo_path.is_none() {
+        return render_no_repo(state);
+    }
+
+    // Context topbar
+    let file_label = st.active_file.as_deref().unwrap_or("");
+    let diff_topbar = row(vec![
+        hgap(SPACE_4),
+        icon_document_outline(FG_MUTED, 12.0),
+        hgap(SPACE_2),
+        text(trunc(file_label, 60), TEXT_XS).color(FG_MUTED).family(FontFamily::Monospace).into(),
+        spacer(),
+    ])
+    .gap(0.0)
+    .height(32.0)
+    .fill_width()
+    .bg(BG_SURFACE)
+    .align_center()
+    .border(BORDER, 1.0)
+    .into();
+
+    // Diff content
+    let diff_content: View = if st.diff_lines.is_empty() && st.active_file.is_none() {
+        render_clean_state(st)
+    } else if st.diff_lines.is_empty() && st.active_file.is_some() {
+        column(vec![
+            gap(SPACE_6),
+            text("No changes", TEXT_SM).color(FG_MUTED).into(),
+        ])
+        .align_center()
+        .fill_width()
+        .grow()
+        .into()
+    } else {
+        render_diff_lines(st, scroll_y, max_scroll)
+    };
+
+    column(vec![diff_topbar, diff_content])
+        .gap(0.0)
+        .grow()
+        .fill_height()
+        .bg(BG_BASE)
+        .into()
+}
+
+fn render_no_repo(state: Signal<AppState>) -> View {
+    let s = state.clone();
+    column(vec![
+        gap(SPACE_6),
+        icon_folder_outline(FG_MUTED, 40.0),
+        gap(SPACE_4),
+        text("No repository open", TEXT_BASE).color(FG).weight(FontWeight::Bold).into(),
+        text("Open a local repository to get started", TEXT_SM).color(FG_MUTED).into(),
+        gap(SPACE_4),
+        button("Open Repository", move || {
+            // Try current directory
+            if let Some(p) = open_repo_picker() {
+                let mut st = s.get();
+                st.repo_path = Some(p.clone());
+                st.current_branch = git_current_branch(&p);
+                let (staged, unstaged) = git_status(&p);
+                st.staged = staged; st.unstaged = unstaged;
+                st.commits = git_log(&p);
+                st.branches = git_branches(&p);
+                s.set(st);
+            }
+        })
+        .bg(Color::rgb(0.137, 0.525, 0.212))
+        .hover_bg(Color::rgb(0.180, 0.627, 0.259))
+        .text_color(FG)
+        .font_size(TEXT_SM).padding(SPACE_4).radius(RADIUS_MD)
+        .into(),
+    ])
+    .gap(0.0)
+    .align_center()
+    .fill_width()
+    .fill_height()
+    .justify_center()
+    .grow()
+    .bg(BG_BASE)
+    .into()
+}
+
+fn render_clean_state(st: &AppState) -> View {
+    let last = st.commits.first();
+    let commit_card: View = if let Some(c) = last {
+        column(vec![
+            row(vec![
+                icon_git_commit_outline(FG_MUTED, 14.0),
+                hgap(SPACE_2),
+                text(c.short_sha(), TEXT_XS).color(FG_MUTED).family(FontFamily::Monospace).into(),
+                spacer(),
+                text(c.relative_time(), TEXT_XS).color(FG_MUTED).into(),
+            ])
+            .gap(0.0)
+            .align_center()
+            .into(),
+            text(trunc(c.message_first_line(), 48), TEXT_SM).color(FG).into(),
+            text(&c.author, TEXT_XS).color(FG_MUTED).into(),
+        ])
+        .gap(SPACE_2)
+        .padding(SPACE_4)
+        .bg(BG_ELEVATED)
+        .border(BORDER, 1.0)
+        .radius(RADIUS_LG)
+        .into()
+    } else {
+        column(vec![]).into()
+    };
+
+    column(vec![
+        gap(SPACE_6),
+        icon_checkmark_outline(GREEN, 32.0),
+        gap(SPACE_3),
+        text("Nothing to commit", TEXT_BASE).color(FG_MUTED).into(),
+        text("Working tree clean", TEXT_XS).color(FG_MUTED).into(),
+        gap(SPACE_4),
+        commit_card,
+    ])
+    .gap(0.0)
+    .align_center()
+    .fill_width()
+    .grow()
+    .justify_center()
+    .into()
+}
+
+fn render_diff_lines(
+    st: &AppState,
+    scroll_y: Signal<f32>,
+    max_scroll: Signal<(f32, f32)>,
+) -> View {
+    let rows: Vec<View> = st.diff_lines.iter().map(|line| diff_line_row(line)).collect();
+
+    scroll(
+        column(rows).gap(0.0).fill_width().into(),
+        Signal::new(0.0),
+        scroll_y,
+        max_scroll,
+    )
+    .fill_width()
+    .grow()
+    .into()
+}
+
+fn diff_line_row(line: &DiffLine) -> View {
+    let (bg, gutter_bg, text_color, sign) = match line.kind {
+        DiffLineKind::Added     => (DIFF_ADD_BG, Color::rgb(0.102, 0.251, 0.129), GREEN, "+"),
+        DiffLineKind::Deleted   => (DIFF_DEL_BG, Color::rgb(0.239, 0.082, 0.094), RED,   "-"),
+        DiffLineKind::Context   => (BG_BASE,     BG_BASE,                          FG,    " "),
+        DiffLineKind::HunkHeader=> (DIFF_HUNK_BG, DIFF_HUNK_BG,                  FG_MUTED," "),
+    };
+
+    let is_hunk = matches!(line.kind, DiffLineKind::HunkHeader);
+    let h = if is_hunk { 20.0 } else { 24.0 };
+
+    // Gutter: old / new line numbers + sign
+    let old_str = line.old_num.map(|n| n.to_string()).unwrap_or_default();
+    let new_str = line.new_num.map(|n| n.to_string()).unwrap_or_default();
+
+    let gutter = row(vec![
+        hgap(SPACE_2),
+        text(old_str, TEXT_XS).color(FG_MUTED).family(FontFamily::Monospace).into(),
+        hgap(SPACE_1),
+        text(new_str, TEXT_XS).color(FG_MUTED).family(FontFamily::Monospace).into(),
+        hgap(SPACE_1),
+        text(sign, TEXT_XS).color(text_color).family(FontFamily::Monospace).into(),
+        hgap(SPACE_1),
+    ])
+    .gap(0.0)
+    .width(52.0)
+    .height(h)
+    .bg(gutter_bg)
+    .align_center()
+    .into();
+
+    let code_text = if is_hunk {
+        text(trunc(&line.content, 80), TEXT_XS).color(text_color).family(FontFamily::Monospace).into()
+    } else {
+        text(line.content.clone(), TEXT_XS).color(text_color).family(FontFamily::Monospace).into()
+    };
+
+    row(vec![
+        gutter,
+        column(vec![]).width(1.0).height(h).bg(BORDER).into(),
+        hgap(SPACE_2),
+        code_text,
+    ])
+    .gap(0.0)
+    .height(h)
+    .fill_width()
+    .bg(bg)
+    .align_center()
+    .into()
+}
+
+// ── AppState helper for max_scroll reset ───────────────────────────────────────
+
+impl AppState {
+    fn max_scroll_reset(&mut self) {
+        // Signals are managed externally; this is a no-op marker
+        // Actual reset happens via signal.set((-1.0,-1.0)) in closures
+    }
 }

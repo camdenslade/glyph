@@ -5,29 +5,27 @@ use core_glyph::{
 };
 use platform_glyph::{App, WindowCloser, WindowOpener};
 use ui_glyph::{
-    alert_danger, alert_danger_dark, alert_info, alert_info_dark,
-    alert_success, alert_success_dark, alert_warning, alert_warning_dark,
+    alert_danger, alert_info,
+    alert_success, alert_warning,
     avatar_placeholder_md,
     badge, badge_danger, badge_success, badge_warning,
-    btn, btn_danger, btn_dark, btn_dark_danger, btn_dark_ghost, btn_dark_secondary,
-    btn_ghost, btn_secondary,
-    card_section, card_section_dark,
+    btn, btn_danger, btn_ghost, btn_secondary,
+    card_section,
     count_bubble,
-    divider_with_label, divider_with_label_dark,
+    divider_with_label,
     dot_online, dot_busy,
-    empty_state_with_action, empty_state_dark,
-    form_field, form_field_dark,
-    hr, hr_dark,
-    kbd, kbd_dark,
-    nav_item, nav_item_dark,
+    empty_state_with_action,
+    form_field,
+    hr,
+    kbd,
+    nav_item,
     pill_primary, pill_success, pill_danger,
     progress_bar,
-    skeleton, skeleton_dark, skeleton_text,
-    stat_card_with_change, stat_card_with_change_dark,
-    tab_bar, tab_bar_dark,
-    tag, tag_dark,
+    skeleton, skeleton_text,
+    stat_card_with_change,
+    tab_bar,
+    tag,
     BLUE_500, GREEN_500, RED_500,
-    colors::{light, dark as dark_colors},
     spacing::SPACE_3,
 };
 use widgets_glyph::{Checkbox, Select, Slider, Toggle};
@@ -44,7 +42,6 @@ impl Component for Counter {
     fn render(&self, theme: &Theme) -> View {
         let c = self.count.clone();
         let c2 = self.count.clone();
-        let is_dark = theme.background.r < 0.5;
         let header = row(vec![
             text("Counter", theme.font_size).color(theme.text).into(),
             spacer(),
@@ -52,15 +49,13 @@ impl Component for Counter {
         ]).fill_width().auto_size().into();
         let body = vec![
             row(vec![
-                if is_dark { btn_dark_secondary("-", move || c.set(c.get() - 1)) }
-                else { btn_secondary("-", move || c.set(c.get() - 1)) },
+                btn_secondary(theme, "-", move || c.set(c.get() - 1)),
                 text(format!("{}", self.count.get()), 28.0)
                     .color(theme.text).width(60.0).into(),
-                if is_dark { btn_dark("+", move || c2.set(c2.get() + 1)) }
-                else { btn("+", move || c2.set(c2.get() + 1)) },
+                btn(theme, "+", move || c2.set(c2.get() + 1)),
             ]).auto_size().gap(12.0).align_center().into(),
         ];
-        if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+        card_section(theme, header, body)
     }
 }
 
@@ -90,7 +85,6 @@ impl TextInputs {
 }
 impl Component for TextInputs {
     fn render(&self, theme: &Theme) -> View {
-        let is_dark = theme.background.r < 0.5;
         let preview = if self.value.get().is_empty() {
             "Nothing typed yet.".to_string()
         } else {
@@ -115,19 +109,11 @@ impl Component for TextInputs {
 
         let header = text("Text Inputs", theme.font_size).color(theme.text).into();
         let body = vec![
-            if is_dark {
-                form_field_dark("Single line", single, None::<&str>, None::<&str>)
-            } else {
-                form_field("Single line", single, None::<&str>, None::<&str>)
-            },
+            form_field(theme, "Single line", single, None::<&str>, None::<&str>),
             text(preview, 13.0).color(theme.text_muted).into(),
-            if is_dark {
-                form_field_dark("Multi line", multi, Some("Shift+Enter for newline"), None::<&str>)
-            } else {
-                form_field("Multi line", multi, Some("Shift+Enter for newline"), None::<&str>)
-            },
+            form_field(theme, "Multi line", multi, Some("Shift+Enter for newline"), None::<&str>),
         ];
-        if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+        card_section(theme, header, body)
     }
 }
 
@@ -152,7 +138,6 @@ impl Component for AnimButton {
         let dim    = Color::rgb(rest.r * 0.75, rest.g * 0.75, rest.b * 0.75);
         let t1 = self.tween.clone(); let t2 = self.tween.clone();
         let hc = self.hover.clone(); let hc2 = self.hover.clone();
-        let is_dark = theme.background.r < 0.5;
         let header = text("Animations", theme.font_size).color(theme.text).into();
         let body = vec![
             button("Hover & click me", || {})
@@ -163,23 +148,22 @@ impl Component for AnimButton {
                 .into(),
             text("Color tweens on hover and press.", 13.0).color(theme.text_muted).into(),
         ];
-        if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+        card_section(theme, header, body)
     }
 }
 
 // Button showcase
 
 fn button_showcase(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
     let header = text("Buttons", theme.font_size).color(theme.text).into();
     let body = vec![
         row(vec![
-            if is_dark { btn_dark("Primary", || {}) } else { btn("Primary", || {}) },
-            if is_dark { btn_dark_secondary("Secondary", || {}) } else { btn_secondary("Secondary", || {}) },
-            if is_dark { btn_dark_ghost("Ghost", || {}) } else { btn_ghost("Ghost", || {}) },
-            if is_dark { btn_dark_danger("Danger", || {}) } else { btn_danger("Danger", || {}) },
+            btn(theme, "Primary", || {}),
+            btn_secondary(theme, "Secondary", || {}),
+            btn_ghost(theme, "Ghost", || {}),
+            btn_danger(theme, "Danger", || {}),
         ]).auto_size().gap(8.0).into(),
-        if is_dark { hr_dark() } else { hr() },
+        hr(theme),
         row(vec![
             badge("default"),
             badge_success("success"),
@@ -187,21 +171,20 @@ fn button_showcase(theme: &Theme) -> View {
             badge_danger("danger"),
         ]).auto_size().gap(6.0).into(),
         row(vec![
-            pill_primary("primary"),
+            pill_primary(theme, "primary"),
             pill_success("success"),
             pill_danger("danger"),
-            if is_dark { tag_dark("tag") } else { tag("tag") },
+            tag(theme, "tag"),
         ]).auto_size().gap(6.0).into(),
     ];
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    card_section(theme, header, body)
 }
 
 // Status & avatars
 
 fn status_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
-    let bg1 = if is_dark { dark_colors::ACCENT } else { light::ACCENT };
-    let bg2 = if is_dark { dark_colors::SUCCESS } else { light::SUCCESS };
+    let bg1 = theme.primary;
+    let bg2 = ui_glyph::colors::dark::SUCCESS;
     let header = text("Status & Avatars", theme.font_size).color(theme.text).into();
     let body = vec![
         row(vec![
@@ -215,55 +198,35 @@ fn status_section(theme: &Theme) -> View {
             ]).auto_size().gap(4.0).into(),
         ]).auto_size().gap(12.0).into(),
     ];
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    card_section(theme, header, body)
 }
 
 // Stats
 
 fn stats_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
-    if is_dark {
-        row(vec![
-            stat_card_with_change_dark("Total Views", "48,291", "+12.4%", true),
-            stat_card_with_change_dark("Signups", "1,204", "+3.1%", true),
-            stat_card_with_change_dark("Churn", "2.3%", "-0.4%", false),
-        ]).fill_width().gap(12.0).into()
-    } else {
-        row(vec![
-            stat_card_with_change("Total Views", "48,291", "+12.4%", true),
-            stat_card_with_change("Signups", "1,204", "+3.1%", true),
-            stat_card_with_change("Churn", "2.3%", "-0.4%", false),
-        ]).fill_width().gap(12.0).into()
-    }
+    row(vec![
+        stat_card_with_change(theme, "Total Views", "48,291", "+12.4%", true),
+        stat_card_with_change(theme, "Signups", "1,204", "+3.1%", true),
+        stat_card_with_change(theme, "Churn", "2.3%", "-0.4%", false),
+    ]).fill_width().gap(12.0).into()
 }
 
 // Alerts
 
 fn alerts_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
     let header = text("Alerts", theme.font_size).color(theme.text).into();
-    let body = if is_dark {
-        vec![
-            alert_info_dark("Note", "This is an informational message."),
-            alert_success_dark("Success", "Your changes have been saved."),
-            alert_warning_dark("Warning", "This action cannot be undone."),
-            alert_danger_dark("Error", "Something went wrong. Please retry."),
-        ]
-    } else {
-        vec![
-            alert_info("Note", "This is an informational message."),
-            alert_success("Success", "Your changes have been saved."),
-            alert_warning("Warning", "This action cannot be undone."),
-            alert_danger("Error", "Something went wrong. Please retry."),
-        ]
-    };
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    let body = vec![
+        alert_info("Note", "This is an informational message."),
+        alert_success("Success", "Your changes have been saved."),
+        alert_warning("Warning", "This action cannot be undone."),
+        alert_danger("Error", "Something went wrong. Please retry."),
+    ];
+    card_section(theme, header, body)
 }
 
 // Progress
 
 fn progress_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
     let header = text("Progress", theme.font_size).color(theme.text).into();
     let body = vec![
         text("Storage", 13.0).color(theme.text_muted).into(),
@@ -273,66 +236,48 @@ fn progress_section(theme: &Theme) -> View {
         text("CPU", 13.0).color(theme.text_muted).into(),
         progress_bar(0.91, RED_500, theme.border, 8.0),
     ];
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    card_section(theme, header, body)
 }
 
 // Skeleton loaders
 
 fn skeleton_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
     let header = text("Skeleton loaders", theme.font_size).color(theme.text).into();
-    let body = if is_dark {
-        vec![
-            row(vec![
-                skeleton_dark(40.0, 40.0),
-                column(vec![
-                    skeleton_dark(160.0, 14.0),
-                    skeleton_dark(120.0, 12.0),
-                ]).auto_size().gap(6.0).into(),
-            ]).auto_size().gap(12.0).into(),
-            skeleton_dark(f32::MAX, 80.0),
-        ]
-    } else {
-        vec![
-            row(vec![
-                skeleton(40.0, 40.0),
-                column(vec![
-                    skeleton_text(160.0),
-                    skeleton_text(120.0),
-                ]).auto_size().gap(6.0).into(),
-            ]).auto_size().gap(12.0).into(),
-            skeleton(f32::MAX, 80.0),
-        ]
-    };
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    let body = vec![
+        row(vec![
+            skeleton(theme, 40.0, 40.0),
+            column(vec![
+                skeleton_text(theme, 160.0),
+                skeleton_text(theme, 120.0),
+            ]).auto_size().gap(6.0).into(),
+        ]).auto_size().gap(12.0).into(),
+        skeleton(theme, f32::MAX, 80.0),
+    ];
+    card_section(theme, header, body)
 }
 
 // Keyboard shortcuts
 
 fn kbd_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
-    let mk = move |k: &str| -> View {
-        if is_dark { kbd_dark(k) } else { kbd(k) }
-    };
     let header = text("Keyboard shortcuts", theme.font_size).color(theme.text).into();
     let body = vec![
         row(vec![
             text("Save", 13.0).color(theme.text).into(),
             spacer(),
-            mk("⌘"), mk("S"),
+            kbd(theme, "⌘"), kbd(theme, "S"),
         ]).fill_width().auto_size().into(),
         row(vec![
             text("Close window", 13.0).color(theme.text).into(),
             spacer(),
-            mk("⌘"), mk("W"),
+            kbd(theme, "⌘"), kbd(theme, "W"),
         ]).fill_width().auto_size().into(),
         row(vec![
             text("Open command palette", 13.0).color(theme.text).into(),
             spacer(),
-            mk("⌘"), mk("K"),
+            kbd(theme, "⌘"), kbd(theme, "K"),
         ]).fill_width().auto_size().into(),
     ];
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    card_section(theme, header, body)
 }
 
 // Controls (checkbox, toggle, select, slider)
@@ -355,7 +300,6 @@ impl Controls {
 }
 impl Component for Controls {
     fn render(&self, theme: &Theme) -> View {
-        let is_dark = theme.background.r < 0.5;
         let header = text("Controls", theme.font_size).color(theme.text).into();
         let body = vec![
             self.show_counter.into_view(theme),
@@ -363,7 +307,7 @@ impl Component for Controls {
             self.theme_select.into_view(theme),
             self.slider.into_view(theme),
         ];
-        if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+        card_section(theme, header, body)
     }
 }
 
@@ -375,7 +319,6 @@ impl TabDemo {
 }
 impl Component for TabDemo {
     fn render(&self, theme: &Theme) -> View {
-        let is_dark = theme.background.r < 0.5;
         let t = self.tab.clone();
         let tabs = vec![
             ("Overview", self.tab.get() == 0),
@@ -387,10 +330,10 @@ impl Component for TabDemo {
             1 => text("Recent activity feed.", 14.0).color(theme.text_muted).into(),
             _ => text("Settings panel.", 14.0).color(theme.text_muted).into(),
         };
-        let tb = if is_dark { tab_bar_dark(tabs, move |i| t.set(i)) } else { tab_bar(tabs, move |i| t.set(i)) };
+        let tb = tab_bar(theme, tabs, move |i| t.set(i));
         let header = text("Tab Bar", theme.font_size).color(theme.text).into();
         let body = vec![tb, content];
-        if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+        card_section(theme, header, body)
     }
 }
 
@@ -401,7 +344,6 @@ impl NavDemo {
     fn new() -> Self { Self { page: Signal::new(0) } }
 
     fn view(&self, theme: &Theme, opener: &WindowOpener) -> View {
-        let is_dark = theme.background.r < 0.5;
         let p1 = self.page.clone();
         let p2 = self.page.clone();
         let o  = opener.clone();
@@ -410,33 +352,22 @@ impl NavDemo {
                 text("Navigate within the app or open new windows.", 13.0)
                     .color(theme.text_muted).wrap().into(),
                 row(vec![
-                    if is_dark { btn_dark("Go to detail", move || p1.set(1)) }
-                    else { btn("Go to detail", move || p1.set(1)) },
-                    if is_dark {
-                        btn_dark_ghost("New window", move || {
-                            o.open(|op, cl| {
-                                let t = Theme::dark();
-                                (t.clone(), second_window(&t, op, cl))
-                            }, "Detail", 480.0, 320.0, Theme::dark());
-                        })
-                    } else {
-                        btn_ghost("New window", move || {
-                            o.open(|op, cl| {
-                                let t = Theme::dark();
-                                (t.clone(), second_window(&t, op, cl))
-                            }, "Detail", 480.0, 320.0, Theme::dark());
-                        })
-                    },
+                    btn(theme, "Go to detail", move || p1.set(1)),
+                    btn_ghost(theme, "New window", move || {
+                        o.open(|op, cl| {
+                            let t = Theme::dark();
+                            (t.clone(), second_window(&t, op, cl))
+                        }, "Detail", 480.0, 320.0, Theme::dark());
+                    }),
                 ]).auto_size().gap(8.0).into(),
             ]).fill_width().gap(10.0).into(),
             _ => column(vec![
                 text("Detail page.", 14.0).color(theme.text_muted).into(),
-                if is_dark { btn_dark_secondary("← Back", move || p2.set(0)) }
-                else { btn_secondary("← Back", move || p2.set(0)) },
+                btn_secondary(theme, "← Back", move || p2.set(0)),
             ]).fill_width().gap(10.0).into(),
         };
         let header = text("Navigation", theme.font_size).color(theme.text).into();
-        if is_dark { card_section_dark(header, vec![content]) } else { card_section(header, vec![content]) }
+        card_section(theme, header, vec![content])
     }
 }
 
@@ -448,7 +379,6 @@ impl VList {
 }
 impl Component for VList {
     fn render(&self, theme: &Theme) -> View {
-        let is_dark = theme.background.r < 0.5;
         let oy = self.offset_y.clone();
         let border = theme.border;
         let tc = theme.text;
@@ -474,54 +404,35 @@ impl Component for VList {
             })
             .fill_width().height(200.0).into(),
         ];
-        if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+        card_section(theme, header, body)
     }
 }
 
 // Empty state
 
 fn empty_section(theme: &Theme) -> View {
-    let is_dark = theme.background.r < 0.5;
-    if is_dark {
-        empty_state_dark(
-            "No results found",
-            "Try adjusting your filters or search query.",
-        )
-    } else {
-        empty_state_with_action(
-            "No results found",
-            "Try adjusting your filters or search query.",
-            btn("Clear filters", || {}),
-        )
-    }
+    empty_state_with_action(
+        theme,
+        "No results found",
+        "Try adjusting your filters or search query.",
+        btn(theme, "Clear filters", || {}),
+    )
 }
 
 fn nav_section(theme: &Theme, router: &Router) -> View {
-    let is_dark = theme.background.r < 0.5;
     let cur = router.current();
     let r0 = router.stack.clone();
     let r1 = router.stack.clone();
     let r2 = router.stack.clone();
 
-    let nav: Vec<View> = if is_dark {
-        vec![
-            nav_item_dark("Dashboard", cur == 0, move || r0.set(vec![0])),
-            nav_item_dark("Projects",  cur == 1, move || r1.set(vec![1])),
-            nav_item_dark("Settings",  cur == 2, move || r2.set(vec![2])),
-            divider_with_label_dark("Recent"),
-            nav_item_dark("glyph-core", false, || {}),
-            nav_item_dark("glyph-demo", false, || {}),
-        ]
-    } else {
-        vec![
-            nav_item("Dashboard", cur == 0, move || r0.set(vec![0])),
-            nav_item("Projects",  cur == 1, move || r1.set(vec![1])),
-            nav_item("Settings",  cur == 2, move || r2.set(vec![2])),
-            divider_with_label("Recent"),
-            nav_item("glyph-core", false, || {}),
-            nav_item("glyph-demo", false, || {}),
-        ]
-    };
+    let nav: Vec<View> = vec![
+        nav_item(theme, "Dashboard", cur == 0, move || r0.set(vec![0])),
+        nav_item(theme, "Projects",  cur == 1, move || r1.set(vec![1])),
+        nav_item(theme, "Settings",  cur == 2, move || r2.set(vec![2])),
+        divider_with_label(theme, "Recent"),
+        nav_item(theme, "glyph-core", false, || {}),
+        nav_item(theme, "glyph-demo", false, || {}),
+    ];
 
     let page_content: View = match cur {
         0 => text("Dashboard - metrics and activity at a glance.", 13.0).color(theme.text_muted).wrap().into(),
@@ -532,7 +443,7 @@ fn nav_section(theme: &Theme, router: &Router) -> View {
     let mut body = nav;
     body.push(page_content);
     let header = text("Nav Items", theme.font_size).color(theme.text).into();
-    if is_dark { card_section_dark(header, body) } else { card_section(header, body) }
+    card_section(theme, header, body)
 }
 
 // Root app
@@ -642,7 +553,7 @@ fn second_window(theme: &Theme, _opener: &WindowOpener, closer: &WindowCloser) -
     column(vec![
         text("Second Window", 24.0).color(theme.text).into(),
         text("Opened from the main window.", 14.0).color(theme.text_muted).wrap().into(),
-        btn_secondary("Close", move || cl.close()),
+        btn_secondary(theme, "Close", move || cl.close()),
     ])
     .justify(core_glyph::JustifyContent::FlexStart)
     .gap(12.0).padding(32.0).fill_width().into()

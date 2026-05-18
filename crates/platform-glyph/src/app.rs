@@ -1514,9 +1514,11 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                 FlatViewKind::Image {
                     path,
                     corner_radius,
+                    tint,
                 } => FlatViewKind::Image {
                     path,
                     corner_radius: corner_radius * scale,
+                    tint,
                 },
                 FlatViewKind::TextArea {
                     value,

@@ -815,9 +815,14 @@ impl Renderer {
                         FlatViewKind::Image {
                             path,
                             corner_radius,
+                            tint,
                         } => {
+                            let tint_arr = match tint {
+                                Some(c) => [c.r, c.g, c.b, c.a],
+                                None    => [0.0, 0.0, 0.0, 0.0],
+                            };
                             let mut verts = Vec::new();
-                            push_image_quad(&mut verts, l, t, fw, fh, corner_radius);
+                            push_image_quad(&mut verts, l, t, fw, fh, corner_radius, tint_arr);
                             current.image_calls.push(ImageCall { path, verts });
                         }
                         _ => {}
@@ -1077,51 +1082,15 @@ fn push_shadow(
     ]);
 }
 
-fn push_image_quad(verts: &mut Vec<ImageVertex>, x: f32, y: f32, w: f32, h: f32, radius: f32) {
+fn push_image_quad(verts: &mut Vec<ImageVertex>, x: f32, y: f32, w: f32, h: f32, radius: f32, tint: [f32; 4]) {
     let r = [x, y, x + w, y + h];
     verts.extend_from_slice(&[
-        ImageVertex {
-            pos: [x, y],
-            uv: [0.0, 0.0],
-            rect: r,
-            radius,
-            _pad: 0.0,
-        },
-        ImageVertex {
-            pos: [x + w, y],
-            uv: [1.0, 0.0],
-            rect: r,
-            radius,
-            _pad: 0.0,
-        },
-        ImageVertex {
-            pos: [x, y + h],
-            uv: [0.0, 1.0],
-            rect: r,
-            radius,
-            _pad: 0.0,
-        },
-        ImageVertex {
-            pos: [x + w, y],
-            uv: [1.0, 0.0],
-            rect: r,
-            radius,
-            _pad: 0.0,
-        },
-        ImageVertex {
-            pos: [x + w, y + h],
-            uv: [1.0, 1.0],
-            rect: r,
-            radius,
-            _pad: 0.0,
-        },
-        ImageVertex {
-            pos: [x, y + h],
-            uv: [0.0, 1.0],
-            rect: r,
-            radius,
-            _pad: 0.0,
-        },
+        ImageVertex { pos: [x,     y    ], uv: [0.0, 0.0], rect: r, radius, _pad: 0.0, tint },
+        ImageVertex { pos: [x + w, y    ], uv: [1.0, 0.0], rect: r, radius, _pad: 0.0, tint },
+        ImageVertex { pos: [x,     y + h], uv: [0.0, 1.0], rect: r, radius, _pad: 0.0, tint },
+        ImageVertex { pos: [x + w, y    ], uv: [1.0, 0.0], rect: r, radius, _pad: 0.0, tint },
+        ImageVertex { pos: [x + w, y + h], uv: [1.0, 1.0], rect: r, radius, _pad: 0.0, tint },
+        ImageVertex { pos: [x,     y + h], uv: [0.0, 1.0], rect: r, radius, _pad: 0.0, tint },
     ]);
 }
 

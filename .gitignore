@@ -1,2 +1,3 @@
 /target
 crates/glyph-github/.env
+GLYPH_CONTEXT.md

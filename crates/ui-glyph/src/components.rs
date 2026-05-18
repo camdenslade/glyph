@@ -1,10 +1,10 @@
 use crate::colors::{dark, light, with_opacity};
-use crate::layout::{divider, divider_dark};
+use crate::layout::divider;
 use crate::shadows::{shadow_dark_md, shadow_md, shadow_sm};
 use crate::spacing::*;
 use core_glyph::{
     button, column, flex, flexible, image, rect, row, spacer, text, AlignItems, Color, FontWeight,
-    JustifyContent, Shadow, View,
+    JustifyContent, Shadow, Theme, View,
 };
 
 // Card — the fundamental surface container
@@ -58,11 +58,19 @@ impl CardOptions {
     }
 }
 
-pub fn card(children: Vec<View>) -> View {
-    card_opts(children, CardOptions::light())
-}
-pub fn card_dark(children: Vec<View>) -> View {
-    card_opts(children, CardOptions::dark())
+pub fn card(theme: &Theme, children: Vec<View>) -> View {
+    card_opts(
+        children,
+        CardOptions {
+            bg: theme.surface,
+            border: Some(theme.border),
+            border_width: 1.0,
+            radius: RADIUS_XL,
+            padding: SPACE_4,
+            shadow: Some(shadow_dark_md()),
+            gap: SPACE_3,
+        },
+    )
 }
 pub fn card_flat(children: Vec<View>) -> View {
     card_opts(children, CardOptions::flat())
@@ -87,76 +95,56 @@ pub fn card_opts(children: Vec<View>, opts: CardOptions) -> View {
 }
 
 // Card with header/body/footer sections
-pub fn card_section(header: View, body: Vec<View>) -> View {
+pub fn card_section(theme: &Theme, header: View, body: Vec<View>) -> View {
     column(vec![
         column(vec![header])
             .padding_x(SPACE_4)
             .padding_y(SPACE_3)
             .into(),
-        divider(),
+        divider(theme),
         column(body).gap(SPACE_3).padding(SPACE_4).into(),
     ])
     .gap(0.0)
-    .bg(light::SURFACE)
-    .border(light::BORDER, 1.0)
-    .radius(RADIUS_XL)
-    .shadow(shadow_sm())
-    .into()
-}
-
-pub fn card_section_dark(header: View, body: Vec<View>) -> View {
-    column(vec![
-        column(vec![header])
-            .padding_x(SPACE_4)
-            .padding_y(SPACE_3)
-            .into(),
-        divider_dark(),
-        column(body).gap(SPACE_3).padding(SPACE_4).into(),
-    ])
-    .gap(0.0)
-    .bg(dark::SURFACE)
-    .border(dark::BORDER, 1.0)
+    .bg(theme.surface)
+    .border(theme.border, 1.0)
     .radius(RADIUS_XL)
     .shadow(shadow_dark_md())
     .into()
 }
 
-pub fn card_section_footer(header: View, body: Vec<View>, footer: Vec<View>) -> View {
+pub fn card_section_footer(theme: &Theme, header: View, body: Vec<View>, footer: Vec<View>) -> View {
     column(vec![
         column(vec![header])
             .padding_x(SPACE_4)
             .padding_y(SPACE_3)
             .into(),
-        divider(),
+        divider(theme),
         column(body).gap(SPACE_3).padding(SPACE_4).into(),
-        divider(),
+        divider(theme),
         row(footer).gap(SPACE_2).padding(SPACE_4).into(),
     ])
     .gap(0.0)
-    .bg(light::SURFACE)
-    .border(light::BORDER, 1.0)
+    .bg(theme.surface)
+    .border(theme.border, 1.0)
     .radius(RADIUS_XL)
     .into()
 }
 
 // Badge — small status/label indicator
 pub fn badge(label: impl Into<String>) -> View {
-    badge_colored(label, light::INFO_BG, light::INFO_FG)
+    badge_colored(label, dark::INFO_BG, dark::INFO_FG)
 }
 pub fn badge_success(label: impl Into<String>) -> View {
-    badge_colored(label, light::SUCCESS_BG, light::SUCCESS_FG)
+    badge_colored(label, dark::SUCCESS_BG, dark::SUCCESS_FG)
 }
 pub fn badge_warning(label: impl Into<String>) -> View {
-    badge_colored(label, light::WARNING_BG, light::WARNING_FG)
+    badge_colored(label, dark::WARNING_BG, dark::WARNING_FG)
 }
 pub fn badge_danger(label: impl Into<String>) -> View {
-    badge_colored(label, light::DANGER_BG, light::DANGER_FG)
+    badge_colored(label, dark::DANGER_BG, dark::DANGER_FG)
 }
 pub fn badge_neutral(label: impl Into<String>) -> View {
-    badge_colored(label, light::SURFACE_3, light::TEXT_MUTED)
-}
-pub fn badge_dark(label: impl Into<String>) -> View {
-    badge_colored(label, dark::SURFACE_2, dark::TEXT_MUTED)
+    badge_colored(label, dark::SURFACE_3, dark::TEXT_MUTED)
 }
 
 pub fn badge_colored(label: impl Into<String>, bg: Color, fg: Color) -> View {
@@ -171,15 +159,15 @@ pub fn badge_colored(label: impl Into<String>, bg: Color, fg: Color) -> View {
     .into()
 }
 
-pub fn badge_dot(label: impl Into<String>, dot_color: Color) -> View {
+pub fn badge_dot(theme: &Theme, label: impl Into<String>, dot_color: Color) -> View {
     row(vec![
         rect(dot_color).width(6.0).height(6.0).radius(3.0).into(),
-        text(label, TEXT_XS).color(light::TEXT_MUTED).into(),
+        text(label, TEXT_XS).color(theme.text_muted).into(),
     ])
     .gap(SPACE_1)
     .padding_x(SPACE_2)
     .padding_y(2.0)
-    .bg(light::SURFACE_2)
+    .bg(dark::SURFACE_2)
     .radius(RADIUS_FULL)
     .into()
 }
@@ -196,38 +184,29 @@ pub fn pill(label: impl Into<String>, bg: Color, fg: Color) -> View {
     .radius(RADIUS_FULL)
     .into()
 }
-pub fn pill_primary(label: impl Into<String>) -> View {
-    pill(label, with_opacity(light::ACCENT, 0.12), light::ACCENT)
+pub fn pill_primary(theme: &Theme, label: impl Into<String>) -> View {
+    pill(label, with_opacity(theme.primary, 0.12), theme.primary)
 }
 pub fn pill_success(label: impl Into<String>) -> View {
-    pill(label, light::SUCCESS_BG, light::SUCCESS_FG)
+    pill(label, dark::SUCCESS_BG, dark::SUCCESS_FG)
 }
 pub fn pill_danger(label: impl Into<String>) -> View {
-    pill(label, light::DANGER_BG, light::DANGER_FG)
+    pill(label, dark::DANGER_BG, dark::DANGER_FG)
 }
 pub fn pill_warning(label: impl Into<String>) -> View {
-    pill(label, light::WARNING_BG, light::WARNING_FG)
+    pill(label, dark::WARNING_BG, dark::WARNING_FG)
 }
 pub fn pill_neutral(label: impl Into<String>) -> View {
-    pill(label, light::SURFACE_2, light::TEXT_MUTED)
+    pill(label, dark::SURFACE_2, dark::TEXT_MUTED)
 }
 
 // Tag — bordered square chip
-pub fn tag(label: impl Into<String>) -> View {
-    row(vec![text(label, TEXT_XS).color(light::TEXT_MUTED).into()])
-        .padding_x(SPACE_2)
-        .padding_y(2.0)
-        .bg(light::SURFACE)
-        .border(light::BORDER, 1.0)
-        .radius(RADIUS_MD)
-        .into()
-}
-pub fn tag_dark(label: impl Into<String>) -> View {
-    row(vec![text(label, TEXT_XS).color(dark::TEXT_MUTED).into()])
+pub fn tag(theme: &Theme, label: impl Into<String>) -> View {
+    row(vec![text(label, TEXT_XS).color(theme.text_muted).into()])
         .padding_x(SPACE_2)
         .padding_y(2.0)
         .bg(dark::SURFACE_2)
-        .border(dark::BORDER, 1.0)
+        .border(theme.border, 1.0)
         .radius(RADIUS_MD)
         .into()
 }
@@ -291,34 +270,16 @@ pub fn avatar_placeholder_xl(initials: impl Into<String>, bg: Color) -> View {
 
 // Alert / notification banner
 pub fn alert_info(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored(title, message, light::INFO_BG, light::INFO_FG, light::INFO)
+    alert_colored(title, message, dark::INFO_BG, dark::INFO_FG, dark::INFO)
 }
 pub fn alert_success(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored(
-        title,
-        message,
-        light::SUCCESS_BG,
-        light::SUCCESS_FG,
-        light::SUCCESS,
-    )
+    alert_colored(title, message, dark::SUCCESS_BG, dark::SUCCESS_FG, dark::SUCCESS)
 }
 pub fn alert_warning(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored(
-        title,
-        message,
-        light::WARNING_BG,
-        light::WARNING_FG,
-        light::WARNING,
-    )
+    alert_colored(title, message, dark::WARNING_BG, dark::WARNING_FG, dark::WARNING)
 }
 pub fn alert_danger(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored(
-        title,
-        message,
-        light::DANGER_BG,
-        light::DANGER_FG,
-        light::DANGER,
-    )
+    alert_colored(title, message, dark::DANGER_BG, dark::DANGER_FG, dark::DANGER)
 }
 
 fn alert_colored(
@@ -350,108 +311,43 @@ fn alert_colored(
     .into()
 }
 
-pub fn alert_info_dark(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored_dark(title, message, dark::INFO_BG, dark::INFO_FG, dark::INFO)
-}
-pub fn alert_success_dark(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored_dark(
-        title,
-        message,
-        dark::SUCCESS_BG,
-        dark::SUCCESS_FG,
-        dark::SUCCESS,
-    )
-}
-pub fn alert_warning_dark(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored_dark(
-        title,
-        message,
-        dark::WARNING_BG,
-        dark::WARNING_FG,
-        dark::WARNING,
-    )
-}
-pub fn alert_danger_dark(title: impl Into<String>, message: impl Into<String>) -> View {
-    alert_colored_dark(
-        title,
-        message,
-        dark::DANGER_BG,
-        dark::DANGER_FG,
-        dark::DANGER,
-    )
-}
-
-fn alert_colored_dark(
-    title: impl Into<String>,
-    message: impl Into<String>,
-    bg: Color,
-    fg: Color,
-    accent: Color,
-) -> View {
-    alert_colored(title, message, bg, fg, accent)
-}
-
 // Stat card — metric display
-pub fn stat_card(label: impl Into<String>, value: impl Into<String>) -> View {
-    card(vec![
-        text(label, TEXT_XS)
-            .weight(FontWeight::Bold)
-            .color(light::TEXT_MUTED)
-            .into(),
-        text(value, TEXT_3XL)
-            .weight(FontWeight::Bold)
-            .color(light::TEXT)
-            .into(),
-    ])
-}
-pub fn stat_card_dark(label: impl Into<String>, value: impl Into<String>) -> View {
-    card_dark(vec![
-        text(label, TEXT_XS)
-            .weight(FontWeight::Bold)
-            .color(dark::TEXT_MUTED)
-            .into(),
-        text(value, TEXT_3XL)
-            .weight(FontWeight::Bold)
-            .color(dark::TEXT)
-            .into(),
-    ])
+pub fn stat_card(theme: &Theme, label: impl Into<String>, value: impl Into<String>) -> View {
+    card(
+        theme,
+        vec![
+            text(label, TEXT_XS)
+                .weight(FontWeight::Bold)
+                .color(theme.text_muted)
+                .into(),
+            text(value, TEXT_3XL)
+                .weight(FontWeight::Bold)
+                .color(theme.text)
+                .into(),
+        ],
+    )
 }
 pub fn stat_card_with_change(
-    label: impl Into<String>,
-    value: impl Into<String>,
-    change: impl Into<String>,
-    positive: bool,
-) -> View {
-    let change_color = if positive { light::SUCCESS } else { light::DANGER };
-    card(vec![
-        text(label, TEXT_XS).weight(FontWeight::Bold).color(light::TEXT_MUTED).into(),
-        row(vec![
-            text(value, TEXT_3XL).weight(FontWeight::Bold).color(light::TEXT).into(),
-            spacer(),
-            text(change, TEXT_SM).weight(FontWeight::Bold).color(change_color).into(),
-        ])
-        .fill_width()
-        .into(),
-    ])
-}
-
-pub fn stat_card_with_change_dark(
+    theme: &Theme,
     label: impl Into<String>,
     value: impl Into<String>,
     change: impl Into<String>,
     positive: bool,
 ) -> View {
     let change_color = if positive { dark::SUCCESS } else { dark::DANGER };
-    card_dark(vec![
-        text(label, TEXT_XS).weight(FontWeight::Bold).color(dark::TEXT_MUTED).into(),
-        row(vec![
-            text(value, TEXT_3XL).weight(FontWeight::Bold).color(dark::TEXT).into(),
-            spacer(),
-            text(change, TEXT_SM).weight(FontWeight::Bold).color(change_color).into(),
-        ])
-        .fill_width()
-        .into(),
-    ])
+    card(
+        theme,
+        vec![
+            text(label, TEXT_XS).weight(FontWeight::Bold).color(theme.text_muted).into(),
+            row(vec![
+                text(value, TEXT_3XL).weight(FontWeight::Bold).color(theme.text).into(),
+                spacer(),
+                text(change, TEXT_SM).weight(FontWeight::Bold).color(change_color).into(),
+            ])
+            .fill_width()
+            .into(),
+        ],
+    )
 }
 
 // Progress bar
@@ -461,7 +357,7 @@ pub fn progress(value: f32, max: f32, color: Color) -> View {
         rect(color).height(6.0).radius(3.0).fill_width(),
     )])
     .fill_width()
-    .bg(light::SURFACE_3)
+    .bg(dark::SURFACE_3)
     .radius(3.0)
     .into()
 }
@@ -483,22 +379,11 @@ pub fn progress_bar(pct: f32, fg: Color, bg: Color, height: f32) -> View {
 }
 
 // Dividers with labels
-pub fn divider_with_label(label: impl Into<String>) -> View {
+pub fn divider_with_label(theme: &Theme, label: impl Into<String>) -> View {
     row(vec![
-        flexible(rect(light::BORDER).height(1.0).fill_width()),
-        text(label, TEXT_XS).color(light::TEXT_MUTED).into(),
-        flexible(rect(light::BORDER).height(1.0).fill_width()),
-    ])
-    .gap(SPACE_3)
-    .fill_width()
-    .into()
-}
-
-pub fn divider_with_label_dark(label: impl Into<String>) -> View {
-    row(vec![
-        flexible(rect(dark::BORDER).height(1.0).fill_width()),
-        text(label, TEXT_XS).color(dark::TEXT_MUTED).into(),
-        flexible(rect(dark::BORDER).height(1.0).fill_width()),
+        flexible(rect(theme.border).height(1.0).fill_width()),
+        text(label, TEXT_XS).color(theme.text_muted).into(),
+        flexible(rect(theme.border).height(1.0).fill_width()),
     ])
     .gap(SPACE_3)
     .fill_width()
@@ -506,45 +391,32 @@ pub fn divider_with_label_dark(label: impl Into<String>) -> View {
 }
 
 // Section headers
-pub fn section_header(title: impl Into<String>) -> View {
+pub fn section_header(theme: &Theme, title: impl Into<String>) -> View {
     column(vec![
         text(title, TEXT_LG)
             .weight(FontWeight::Bold)
-            .color(light::TEXT)
+            .color(theme.text)
             .into(),
-        divider(),
+        divider(theme),
     ])
     .gap(SPACE_2)
     .padding_y(SPACE_2)
     .into()
 }
 
-pub fn section_header_with_action(title: impl Into<String>, action: View) -> View {
+pub fn section_header_with_action(theme: &Theme, title: impl Into<String>, action: View) -> View {
     column(vec![
         row(vec![
             text(title, TEXT_LG)
                 .weight(FontWeight::Bold)
-                .color(light::TEXT)
+                .color(theme.text)
                 .into(),
             spacer(),
             action,
         ])
         .fill_width()
         .into(),
-        divider(),
-    ])
-    .gap(SPACE_2)
-    .padding_y(SPACE_2)
-    .into()
-}
-
-pub fn section_header_dark(title: impl Into<String>) -> View {
-    column(vec![
-        text(title, TEXT_LG)
-            .weight(FontWeight::Bold)
-            .color(dark::TEXT)
-            .into(),
-        divider_dark(),
+        divider(theme),
     ])
     .gap(SPACE_2)
     .padding_y(SPACE_2)
@@ -560,38 +432,25 @@ pub fn list_row(children: Vec<View>) -> View {
         .into()
 }
 
-pub fn list_row_divided(children: Vec<View>) -> View {
-    column(vec![list_row(children), divider()]).gap(0.0).into()
-}
-
-pub fn list_row_dark(children: Vec<View>) -> View {
-    row(children)
-        .padding_y(SPACE_3)
-        .padding_x(SPACE_4)
-        .fill_width()
-        .into()
-}
-
-pub fn list_row_dark_divided(children: Vec<View>) -> View {
-    column(vec![list_row_dark(children), divider_dark()])
-        .gap(0.0)
-        .into()
+pub fn list_row_divided(theme: &Theme, children: Vec<View>) -> View {
+    column(vec![list_row(children), divider(theme)]).gap(0.0).into()
 }
 
 // Two-line list item — title + subtitle
-pub fn list_item(title: impl Into<String>, subtitle: impl Into<String>) -> View {
+pub fn list_item(theme: &Theme, title: impl Into<String>, subtitle: impl Into<String>) -> View {
     list_row(vec![column(vec![
         text(title, TEXT_BASE)
             .weight(FontWeight::Bold)
-            .color(light::TEXT)
+            .color(theme.text)
             .into(),
-        text(subtitle, TEXT_SM).color(light::TEXT_MUTED).into(),
+        text(subtitle, TEXT_SM).color(theme.text_muted).into(),
     ])
     .gap(SPACE_0_5)
     .into()])
 }
 
 pub fn list_item_with_trailing(
+    theme: &Theme,
     title: impl Into<String>,
     subtitle: impl Into<String>,
     trailing: View,
@@ -600,9 +459,9 @@ pub fn list_item_with_trailing(
         column(vec![
             text(title, TEXT_BASE)
                 .weight(FontWeight::Bold)
-                .color(light::TEXT)
+                .color(theme.text)
                 .into(),
-            text(subtitle, TEXT_SM).color(light::TEXT_MUTED).into(),
+            text(subtitle, TEXT_SM).color(theme.text_muted).into(),
         ])
         .gap(SPACE_0_5)
         .grow()
@@ -612,28 +471,22 @@ pub fn list_item_with_trailing(
 }
 
 // Loading indicator (text-based, no spinner primitives)
-pub fn loading(message: impl Into<String>) -> View {
-    column(vec![text(message, TEXT_SM).color(light::TEXT_MUTED).into()])
-        .align(AlignItems::Center)
-        .padding(SPACE_8)
-        .into()
-}
-pub fn loading_dark(message: impl Into<String>) -> View {
-    column(vec![text(message, TEXT_SM).color(dark::TEXT_MUTED).into()])
+pub fn loading(theme: &Theme, message: impl Into<String>) -> View {
+    column(vec![text(message, TEXT_SM).color(theme.text_muted).into()])
         .align(AlignItems::Center)
         .padding(SPACE_8)
         .into()
 }
 
 // Empty state
-pub fn empty_state(title: impl Into<String>, description: impl Into<String>) -> View {
+pub fn empty_state(theme: &Theme, title: impl Into<String>, description: impl Into<String>) -> View {
     column(vec![
         text(title, TEXT_LG)
             .weight(FontWeight::Bold)
-            .color(light::TEXT)
+            .color(theme.text)
             .into(),
         text(description, TEXT_SM)
-            .color(light::TEXT_MUTED)
+            .color(theme.text_muted)
             .wrap()
             .into(),
     ])
@@ -644,6 +497,7 @@ pub fn empty_state(title: impl Into<String>, description: impl Into<String>) -> 
 }
 
 pub fn empty_state_with_action(
+    theme: &Theme,
     title: impl Into<String>,
     description: impl Into<String>,
     action: View,
@@ -651,10 +505,10 @@ pub fn empty_state_with_action(
     column(vec![
         text(title, TEXT_LG)
             .weight(FontWeight::Bold)
-            .color(light::TEXT)
+            .color(theme.text)
             .into(),
         text(description, TEXT_SM)
-            .color(light::TEXT_MUTED)
+            .color(theme.text_muted)
             .wrap()
             .into(),
         action,
@@ -665,41 +519,25 @@ pub fn empty_state_with_action(
     .into()
 }
 
-pub fn empty_state_dark(title: impl Into<String>, description: impl Into<String>) -> View {
-    column(vec![
-        text(title, TEXT_LG)
-            .weight(FontWeight::Bold)
-            .color(dark::TEXT)
-            .into(),
-        text(description, TEXT_SM)
-            .color(dark::TEXT_MUTED)
-            .wrap()
-            .into(),
-    ])
-    .gap(SPACE_2)
-    .align(AlignItems::Center)
-    .padding(SPACE_16)
-    .into()
-}
-
 // Icon with label row
-pub fn icon_label(icon_path: impl Into<String>, label: impl Into<String>, icon_size: f32) -> View {
+pub fn icon_label(theme: &Theme, icon_path: impl Into<String>, label: impl Into<String>, icon_size: f32) -> View {
     row(vec![
         image(icon_path).size(icon_size, icon_size).into(),
-        text(label, TEXT_SM).color(light::TEXT).into(),
+        text(label, TEXT_SM).color(theme.text).into(),
     ])
     .gap(SPACE_2)
     .into()
 }
 
 pub fn icon_label_muted(
+    theme: &Theme,
     icon_path: impl Into<String>,
     label: impl Into<String>,
     icon_size: f32,
 ) -> View {
     row(vec![
         image(icon_path).size(icon_size, icon_size).into(),
-        text(label, TEXT_SM).color(light::TEXT_MUTED).into(),
+        text(label, TEXT_SM).color(theme.text_muted).into(),
     ])
     .gap(SPACE_2)
     .into()
@@ -716,27 +554,14 @@ pub fn tooltip(content: impl Into<String>) -> View {
 }
 
 // Keyboard shortcut chip
-pub fn kbd(key: impl Into<String>) -> View {
+pub fn kbd(theme: &Theme, key: impl Into<String>) -> View {
     row(vec![text(key, TEXT_XS)
         .weight(FontWeight::Bold)
-        .color(light::TEXT_MUTED)
+        .color(theme.text_muted)
         .into()])
     .padding_x(SPACE_1)
     .padding_y(1.0)
-    .bg(light::SURFACE)
-    .border(light::BORDER_STRONG, 1.0)
-    .radius(RADIUS_MD)
-    .into()
-}
-
-pub fn kbd_dark(key: impl Into<String>) -> View {
-    row(vec![text(key, TEXT_XS)
-        .weight(FontWeight::Bold)
-        .color(dark::TEXT_MUTED)
-        .into()])
-    .padding_x(SPACE_1)
-    .padding_y(1.0)
-    .bg(dark::SURFACE_2)
+    .bg(theme.surface)
     .border(dark::BORDER_STRONG, 1.0)
     .radius(RADIUS_MD)
     .into()
@@ -761,11 +586,8 @@ pub fn count_bubble(n: u32, color: Color) -> View {
 }
 
 // Horizontal rule with spacing
-pub fn hr() -> View {
-    column(vec![divider()]).padding_y(SPACE_4).into()
-}
-pub fn hr_dark() -> View {
-    column(vec![divider_dark()]).padding_y(SPACE_4).into()
+pub fn hr(theme: &Theme) -> View {
+    column(vec![divider(theme)]).padding_y(SPACE_4).into()
 }
 
 // Colored dot indicators
@@ -777,41 +599,34 @@ pub fn dot(color: Color, size: f32) -> View {
         .into()
 }
 pub fn dot_online() -> View {
-    dot(light::SUCCESS, 8.0)
+    dot(dark::SUCCESS, 8.0)
 }
 pub fn dot_offline() -> View {
-    dot(light::TEXT_SUBTLE, 8.0)
+    dot(dark::TEXT_SUBTLE, 8.0)
 }
 pub fn dot_busy() -> View {
-    dot(light::WARNING, 8.0)
+    dot(dark::WARNING, 8.0)
 }
 pub fn dot_error() -> View {
-    dot(light::DANGER, 8.0)
+    dot(dark::DANGER, 8.0)
 }
 
 // Skeleton / placeholder loading block
-pub fn skeleton(width: f32, height: f32) -> View {
-    rect(light::SURFACE_3)
-        .width(width)
-        .height(height)
-        .radius(RADIUS_MD)
-        .into()
-}
-pub fn skeleton_dark(width: f32, height: f32) -> View {
+pub fn skeleton(_theme: &Theme, width: f32, height: f32) -> View {
     rect(dark::SURFACE_2)
         .width(width)
         .height(height)
         .radius(RADIUS_MD)
         .into()
 }
-pub fn skeleton_text(width: f32) -> View {
-    skeleton(width, TEXT_BASE)
+pub fn skeleton_text(theme: &Theme, width: f32) -> View {
+    skeleton(theme, width, TEXT_BASE)
 }
-pub fn skeleton_text_sm(width: f32) -> View {
-    skeleton(width, TEXT_SM)
+pub fn skeleton_text_sm(theme: &Theme, width: f32) -> View {
+    skeleton(theme, width, TEXT_SM)
 }
-pub fn skeleton_avatar(size: f32) -> View {
-    rect(light::SURFACE_3)
+pub fn skeleton_avatar(_theme: &Theme, size: f32) -> View {
+    rect(dark::SURFACE_2)
         .width(size)
         .height(size)
         .radius(size / 2.0)
@@ -819,96 +634,48 @@ pub fn skeleton_avatar(size: f32) -> View {
 }
 
 // Code block
-pub fn code_block(content: impl Into<String>) -> View {
+pub fn code_block(theme: &Theme, content: impl Into<String>) -> View {
     column(vec![text(content, TEXT_SM)
         .wrap()
-        .color(light::TEXT)
+        .color(theme.text)
         .into()])
     .padding(SPACE_4)
-    .bg(light::SURFACE_2)
-    .border(light::BORDER, 1.0)
+    .bg(dark::BG_SUBTLE)
+    .border(theme.border, 1.0)
     .radius(RADIUS_LG)
     .into()
 }
-pub fn code_block_dark(content: impl Into<String>) -> View {
-    column(vec![text(content, TEXT_SM).wrap().color(dark::TEXT).into()])
-        .padding(SPACE_4)
-        .bg(dark::BG_SUBTLE)
-        .border(dark::BORDER, 1.0)
-        .radius(RADIUS_LG)
-        .into()
-}
 
 // Inline code
-pub fn code_inline(content: impl Into<String>) -> View {
-    row(vec![text(content, TEXT_SM).color(light::TEXT).into()])
+pub fn code_inline(theme: &Theme, content: impl Into<String>) -> View {
+    row(vec![text(content, TEXT_SM).color(theme.text).into()])
         .padding_x(SPACE_1)
         .padding_y(1.0)
-        .bg(light::SURFACE_2)
-        .border(light::BORDER, 1.0)
+        .bg(dark::SURFACE_2)
+        .border(theme.border, 1.0)
         .radius(RADIUS_MD)
         .into()
 }
 
 // Tab bar — horizontal navigation tabs
-pub fn tab_bar(tabs: Vec<(&str, bool)>, on_select: impl Fn(usize) + 'static + Clone) -> View {
+pub fn tab_bar(theme: &Theme, tabs: Vec<(&str, bool)>, on_select: impl Fn(usize) + 'static + Clone) -> View {
     let items: Vec<View> = tabs
         .into_iter()
         .enumerate()
         .map(|(i, (label, active))| {
             let on_select = on_select.clone();
             let bg = if active {
-                light::ACCENT
+                theme.primary
             } else {
                 Color::TRANSPARENT
             };
             let fg = if active {
                 Color::WHITE
             } else {
-                light::TEXT_MUTED
+                theme.text_muted
             };
             let hover = if active {
-                light::ACCENT
-            } else {
-                light::SURFACE_2
-            };
-            button(label, move || on_select(i))
-                .bg(bg)
-                .hover_bg(hover)
-                .text_color(fg)
-                .radius(RADIUS_LG)
-                .height(BTN_HEIGHT_SM)
-                .padding(SPACE_3)
-                .font_size(TEXT_SM)
-                .into()
-        })
-        .collect();
-    row(items)
-        .gap(SPACE_1)
-        .padding(SPACE_1)
-        .bg(light::SURFACE_2)
-        .radius(RADIUS_XL)
-        .into()
-}
-
-pub fn tab_bar_dark(tabs: Vec<(&str, bool)>, on_select: impl Fn(usize) + 'static + Clone) -> View {
-    let items: Vec<View> = tabs
-        .into_iter()
-        .enumerate()
-        .map(|(i, (label, active))| {
-            let on_select = on_select.clone();
-            let bg = if active {
-                dark::ACCENT
-            } else {
-                Color::TRANSPARENT
-            };
-            let fg = if active {
-                Color::WHITE
-            } else {
-                dark::TEXT_MUTED
-            };
-            let hover = if active {
-                dark::ACCENT
+                theme.primary
             } else {
                 dark::SURFACE_2
             };
@@ -933,6 +700,7 @@ pub fn tab_bar_dark(tabs: Vec<(&str, bool)>, on_select: impl Fn(usize) + 'static
 
 // Underline-style tabs (like GitHub)
 pub fn tab_bar_underline(
+    theme: &Theme,
     tabs: Vec<(&str, bool)>,
     active_color: Color,
     on_select: impl Fn(usize) + 'static + Clone,
@@ -948,14 +716,14 @@ pub fn tab_bar_underline(
                 Color::TRANSPARENT
             };
             let fg = if active {
-                light::TEXT
+                theme.text
             } else {
-                light::TEXT_MUTED
+                theme.text_muted
             };
             column(vec![
                 button(label, move || on_select(i))
                     .bg(Color::TRANSPARENT)
-                    .hover_bg(light::SURFACE_2)
+                    .hover_bg(dark::SURFACE_2)
                     .text_color(fg)
                     .height(BTN_HEIGHT_SM)
                     .padding(SPACE_3)
@@ -967,48 +735,21 @@ pub fn tab_bar_underline(
             .into()
         })
         .collect();
-    column(vec![row(items).gap(0.0).into(), divider()])
+    column(vec![row(items).gap(0.0).into(), divider(theme)])
         .gap(0.0)
         .into()
 }
 
 // Sidebar nav item
-pub fn nav_item(label: impl Into<String>, active: bool, on_click: impl Fn() + 'static) -> View {
+pub fn nav_item(theme: &Theme, label: impl Into<String>, active: bool, on_click: impl Fn() + 'static) -> View {
     let bg = if active {
-        with_opacity(light::ACCENT, 0.10)
+        with_opacity(theme.primary, 0.10)
     } else {
         Color::TRANSPARENT
     };
-    let fg = if active { light::ACCENT } else { light::TEXT };
+    let fg = if active { theme.primary } else { theme.text };
     let hover = if active {
-        with_opacity(light::ACCENT, 0.12)
-    } else {
-        light::SURFACE_2
-    };
-    button(label, on_click)
-        .bg(bg)
-        .hover_bg(hover)
-        .text_color(fg)
-        .radius(RADIUS_LG)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_3)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-pub fn nav_item_dark(
-    label: impl Into<String>,
-    active: bool,
-    on_click: impl Fn() + 'static,
-) -> View {
-    let bg = if active {
-        with_opacity(dark::ACCENT, 0.15)
-    } else {
-        Color::TRANSPARENT
-    };
-    let fg = if active { dark::ACCENT } else { dark::TEXT };
-    let hover = if active {
-        with_opacity(dark::ACCENT, 0.18)
+        with_opacity(theme.primary, 0.12)
     } else {
         dark::SURFACE_2
     };
@@ -1024,7 +765,7 @@ pub fn nav_item_dark(
 }
 
 // Breadcrumb
-pub fn breadcrumb(segments: Vec<impl Into<String>>) -> View {
+pub fn breadcrumb(theme: &Theme, segments: Vec<impl Into<String>>) -> View {
     let n = segments.len();
     let items: Vec<View> = segments
         .into_iter()
@@ -1033,10 +774,10 @@ pub fn breadcrumb(segments: Vec<impl Into<String>>) -> View {
             let s: String = seg.into();
             let is_last = i == n - 1;
             let mut out = vec![text(s, TEXT_SM)
-                .color(if is_last { light::TEXT } else { light::ACCENT })
+                .color(if is_last { theme.text } else { theme.primary })
                 .into()];
             if !is_last {
-                out.push(text("/", TEXT_SM).color(light::TEXT_MUTED).into());
+                out.push(text("/", TEXT_SM).color(theme.text_muted).into());
             }
             out
         })
@@ -1045,13 +786,13 @@ pub fn breadcrumb(segments: Vec<impl Into<String>>) -> View {
 }
 
 // Table
-pub fn table_header(cols: Vec<impl Into<String>>) -> View {
+pub fn table_header(theme: &Theme, cols: Vec<impl Into<String>>) -> View {
     let cells: Vec<View> = cols
         .into_iter()
         .map(|c| {
             column(vec![text(c, TEXT_XS)
                 .weight(FontWeight::Bold)
-                .color(light::TEXT_MUTED)
+                .color(theme.text_muted)
                 .into()])
             .padding_x(SPACE_4)
             .padding_y(SPACE_3)
@@ -1059,13 +800,13 @@ pub fn table_header(cols: Vec<impl Into<String>>) -> View {
             .into()
         })
         .collect();
-    column(vec![row(cells).fill_width().into(), divider()])
+    column(vec![row(cells).fill_width().into(), divider(theme)])
         .gap(0.0)
-        .bg(light::SURFACE_2)
+        .bg(dark::SURFACE_2)
         .into()
 }
 
-pub fn table_row(cells: Vec<View>) -> View {
+pub fn table_row(theme: &Theme, cells: Vec<View>) -> View {
     let wrapped: Vec<View> = cells
         .into_iter()
         .map(|c| {
@@ -1076,12 +817,12 @@ pub fn table_row(cells: Vec<View>) -> View {
                 .into()
         })
         .collect();
-    column(vec![row(wrapped).fill_width().into(), divider()])
+    column(vec![row(wrapped).fill_width().into(), divider(theme)])
         .gap(0.0)
         .into()
 }
 
-pub fn table_row_hoverable(cells: Vec<View>) -> View {
+pub fn table_row_hoverable(theme: &Theme, cells: Vec<View>) -> View {
     let wrapped: Vec<View> = cells
         .into_iter()
         .map(|c| {
@@ -1092,13 +833,14 @@ pub fn table_row_hoverable(cells: Vec<View>) -> View {
                 .into()
         })
         .collect();
-    column(vec![row(wrapped).fill_width().into(), divider()])
+    column(vec![row(wrapped).fill_width().into(), divider(theme)])
         .gap(0.0)
         .into()
 }
 
 // Form field — label + input + optional hint/error
 pub fn form_field(
+    theme: &Theme,
     label_text: impl Into<String>,
     input: View,
     hint: Option<impl Into<String>>,
@@ -1107,62 +849,41 @@ pub fn form_field(
     let mut items: Vec<View> = vec![
         text(label_text, TEXT_SM)
             .weight(FontWeight::Bold)
-            .color(light::TEXT)
-            .into(),
-        input,
-    ];
-    if let Some(e) = error {
-        items.push(text(e, TEXT_XS).color(light::DANGER).into());
-    } else if let Some(h) = hint {
-        items.push(text(h, TEXT_XS).color(light::TEXT_MUTED).into());
-    }
-    column(items).gap(SPACE_1).into()
-}
-
-pub fn form_field_dark(
-    label_text: impl Into<String>,
-    input: View,
-    hint: Option<impl Into<String>>,
-    error: Option<impl Into<String>>,
-) -> View {
-    let mut items: Vec<View> = vec![
-        text(label_text, TEXT_SM)
-            .weight(FontWeight::Bold)
-            .color(dark::TEXT)
+            .color(theme.text)
             .into(),
         input,
     ];
     if let Some(e) = error {
         items.push(text(e, TEXT_XS).color(dark::DANGER).into());
     } else if let Some(h) = hint {
-        items.push(text(h, TEXT_XS).color(dark::TEXT_MUTED).into());
+        items.push(text(h, TEXT_XS).color(theme.text_muted).into());
     }
     column(items).gap(SPACE_1).into()
 }
 
 // Checkbox-style toggle row (visual only — state managed by caller)
-pub fn toggle_row(label: impl Into<String>, enabled: bool, _on_click: impl Fn() + 'static) -> View {
+pub fn toggle_row(theme: &Theme, label: impl Into<String>, enabled: bool, _on_click: impl Fn() + 'static) -> View {
     let bg = if enabled {
-        light::ACCENT
+        theme.primary
     } else {
-        light::SURFACE_3
+        dark::SURFACE_3
     };
     row(vec![
         column(vec![rect(bg).width(36.0).height(20.0).radius(10.0).into()])
             .width(36.0)
             .height(20.0)
             .into(),
-        text(label, TEXT_SM).color(light::TEXT).into(),
+        text(label, TEXT_SM).color(theme.text).into(),
     ])
     .gap(SPACE_3)
     .into()
 }
 
 // Inline icon-text pair used in list items
-pub fn meta_item(icon_path: impl Into<String>, value: impl Into<String>) -> View {
+pub fn meta_item(theme: &Theme, icon_path: impl Into<String>, value: impl Into<String>) -> View {
     row(vec![
         image(icon_path).size(ICON_SM, ICON_SM).into(),
-        text(value, TEXT_SM).color(light::TEXT_MUTED).into(),
+        text(value, TEXT_SM).color(theme.text_muted).into(),
     ])
     .gap(SPACE_2)
     .into()

@@ -33,6 +33,7 @@ pub struct ImageVertex {
     pub rect:   [f32; 4], // pixel-space bounds [x0, y0, x1, y1]
     pub radius: f32,
     pub _pad:   f32,
+    pub tint:   [f32; 4], // rgba tint; alpha=0 means no tint (passthrough)
 }
 
 #[repr(C)]
@@ -345,6 +346,8 @@ impl ImagePipeline {
                         1 => Float32x2,  // uv
                         2 => Float32x4,  // rect bounds
                         3 => Float32,    // radius
+                        4 => Float32,    // _pad
+                        5 => Float32x4,  // tint rgba
                     ],
                 }],
                 compilation_options: Default::default(),

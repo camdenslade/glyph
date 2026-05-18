@@ -1,6 +1,7 @@
 pub mod buttons;
 pub mod colors;
 pub mod components;
+pub mod icons;
 pub mod layout;
 pub mod shadows;
 pub mod spacing;
@@ -216,8 +217,7 @@ pub use typography::{
 
 // Buttons
 pub use buttons::{
-    btn, btn_colored, btn_danger, btn_danger_ghost, btn_danger_sm, btn_dark, btn_dark_danger,
-    btn_dark_ghost, btn_dark_ghost_muted, btn_dark_secondary, btn_ghost, btn_ghost_muted,
+    btn, btn_colored, btn_danger, btn_danger_ghost, btn_danger_sm, btn_ghost, btn_ghost_muted,
     btn_ghost_sm, btn_lg, btn_pill, btn_pill_ghost, btn_pill_secondary, btn_secondary,
     btn_secondary_sm, btn_sm, btn_styled, btn_success, btn_xl, BtnStyle,
 };
@@ -226,7 +226,7 @@ pub use buttons::{
 pub use layout::{
     aspect_square, aspect_video, backdrop, between, between_many, center_both, center_h, center_v,
     container, container_2xl, container_lg, container_md, container_sm, container_xl, divider,
-    divider_colored, divider_dark, divider_dark_v, divider_v, divider_v_colored, gap, gap_1,
+    divider_colored, divider_v, divider_v_colored, gap, gap_1,
     gap_12, gap_16, gap_2, gap_3, gap_4, gap_6, gap_8, grid_row, grid_row_2, grid_row_3,
     grid_row_4, hgap, hgap_2, hgap_4, hgap_6, hgap_8, hstack, inset, padded, padded_x, padded_y,
     page, sidebar_layout, sidebar_layout_right, vstack,
@@ -234,15 +234,11 @@ pub use layout::{
 
 // Components
 pub use components::{
-    alert_danger,
-    alert_danger_dark,
     // Alert
+    alert_danger,
     alert_info,
-    alert_info_dark,
     alert_success,
-    alert_success_dark,
     alert_warning,
-    alert_warning_dark,
     // Avatar
     avatar,
     avatar_lg,
@@ -258,59 +254,46 @@ pub use components::{
     badge,
     badge_colored,
     badge_danger,
-    badge_dark,
     badge_dot,
     badge_neutral,
     badge_success,
     badge_warning,
     breadcrumb,
     card,
-    card_dark,
     card_elevated,
     card_flat,
     card_opts,
     card_section,
-    card_section_dark,
     card_section_footer,
     code_block,
-    code_block_dark,
     code_inline,
     count_bubble,
     // Dividers with labels
     divider_with_label,
-    divider_with_label_dark,
     dot,
     dot_busy,
     dot_error,
     dot_offline,
     dot_online,
     empty_state,
-    empty_state_dark,
     empty_state_with_action,
     // Form
     form_field,
-    form_field_dark,
     hr,
-    hr_dark,
     // Icons
     icon_label,
     icon_label_muted,
     kbd,
-    kbd_dark,
     list_item,
     list_item_with_trailing,
     // List
     list_row,
-    list_row_dark,
-    list_row_dark_divided,
     list_row_divided,
     // Loading / empty
     loading,
-    loading_dark,
     // Meta
     meta_item,
     nav_item,
-    nav_item_dark,
     // Pill
     pill,
     pill_danger,
@@ -322,29 +305,24 @@ pub use components::{
     progress_bar,
     // Section
     section_header,
-    section_header_dark,
     section_header_with_action,
     skeleton,
     skeleton_avatar,
-    skeleton_dark,
     skeleton_text,
     skeleton_text_sm,
     // Stat
     stat_card,
-    stat_card_dark,
     stat_card_with_change,
-    stat_card_with_change_dark,
     // Navigation
     tab_bar,
-    tab_bar_dark,
     tab_bar_underline,
     // Table
     table_header,
     table_row,
+    table_row_hoverable,
     // Tag
     tag,
     tag_colored,
-    tag_dark,
     // Toggle
     toggle_row,
     // Misc
@@ -352,6 +330,10 @@ pub use components::{
     // Card
     CardOptions,
 };
+
+// Icons (Ionicons)
+pub use icons::icon;
+pub use icons::*;
 
 // Themes
 pub use themes::{

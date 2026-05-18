@@ -178,6 +178,7 @@ pub enum View {
     },
     Button {
         label: String,
+        child: Option<Box<View>>,
         on_click: Arc<dyn Fn()>,
         on_hover: Option<Arc<dyn Fn(bool)>>,
         on_press: Option<Arc<dyn Fn(bool)>>,
@@ -240,6 +241,7 @@ pub enum View {
     Image {
         path: String,
         corner_radius: f32,
+        tint: Option<Color>,
         style: Style,
     },
     /// A single-line text input field. `value` holds the current string;
@@ -558,6 +560,7 @@ pub fn button(label: impl Into<String>, on_click: impl Fn() + 'static) -> Button
     ButtonView {
         view: View::Button {
             label: label.into(),
+            child: None,
             on_click: Arc::new(on_click),
             on_hover: None,
             on_press: None,
@@ -571,6 +574,30 @@ pub fn button(label: impl Into<String>, on_click: impl Fn() + 'static) -> Button
             family: FontFamily::SansSerif,
             style: Style {
                 padding: taffy::Rect::length(12.0),
+                ..Default::default()
+            },
+        },
+    }
+}
+
+pub fn button_view(child: View, on_click: impl Fn() + 'static) -> ButtonView {
+    ButtonView {
+        view: View::Button {
+            label: String::new(),
+            child: Some(Box::new(child)),
+            on_click: Arc::new(on_click),
+            on_hover: None,
+            on_press: None,
+            bg_color: Color::rgb(0.85, 0.85, 0.85),
+            hover_bg_color: None,
+            press_bg_color: None,
+            text_color: Color::BLACK,
+            corner_radius: 8.0,
+            font_size: 16.0,
+            wrap: false,
+            family: FontFamily::SansSerif,
+            style: Style {
+                padding: taffy::Rect::length(8.0),
                 ..Default::default()
             },
         },
@@ -1302,12 +1329,17 @@ impl ImageView {
     }
 
     pub fn radius(mut self, r: f32) -> Self {
-        if let View::Image {
-            ref mut corner_radius,
-            ..
-        } = self.view
-        {
+        if let View::Image { ref mut corner_radius, .. } = self.view {
             *corner_radius = r;
+        }
+        self
+    }
+
+    /// Tint the image: replaces the image's RGB with `color` while preserving
+    /// the alpha channel as a mask. Ideal for single-colour SVG icons.
+    pub fn tint(mut self, color: Color) -> Self {
+        if let View::Image { ref mut tint, .. } = self.view {
+            *tint = Some(color);
         }
         self
     }
@@ -1326,6 +1358,7 @@ pub fn image(path: impl Into<String>) -> ImageView {
         view: View::Image {
             path: path.into(),
             corner_radius: 0.0,
+            tint: None,
             style: Style::default(),
         },
     }

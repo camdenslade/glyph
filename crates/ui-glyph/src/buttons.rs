@@ -1,13 +1,12 @@
-use crate::colors::{dark, light};
+use crate::colors::{dark, light, with_opacity};
 use crate::spacing::*;
-use core_glyph::{button, Color, View};
+use core_glyph::{button, Color, Theme, View};
 
-// Primary buttons — solid filled
-pub fn btn(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::ACCENT)
-        .hover_bg(light::ACCENT_HOVER)
-        .text_color(light::ACCENT_FG)
+        .bg(theme.primary)
+        .hover_bg(with_opacity(theme.primary, 0.85))
+        .text_color(theme.on_primary)
         .radius(RADIUS_XL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_4)
@@ -15,11 +14,11 @@ pub fn btn(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
         .into()
 }
 
-pub fn btn_sm(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_sm(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::ACCENT)
-        .hover_bg(light::ACCENT_HOVER)
-        .text_color(light::ACCENT_FG)
+        .bg(theme.primary)
+        .hover_bg(with_opacity(theme.primary, 0.85))
+        .text_color(theme.on_primary)
         .radius(RADIUS_LG)
         .height(BTN_HEIGHT_SM)
         .padding(SPACE_3)
@@ -27,11 +26,11 @@ pub fn btn_sm(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
         .into()
 }
 
-pub fn btn_lg(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_lg(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::ACCENT)
-        .hover_bg(light::ACCENT_HOVER)
-        .text_color(light::ACCENT_FG)
+        .bg(theme.primary)
+        .hover_bg(with_opacity(theme.primary, 0.85))
+        .text_color(theme.on_primary)
         .radius(RADIUS_XL)
         .height(BTN_HEIGHT_LG)
         .padding(SPACE_6)
@@ -39,11 +38,11 @@ pub fn btn_lg(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
         .into()
 }
 
-pub fn btn_xl(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_xl(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::ACCENT)
-        .hover_bg(light::ACCENT_HOVER)
-        .text_color(light::ACCENT_FG)
+        .bg(theme.primary)
+        .hover_bg(with_opacity(theme.primary, 0.85))
+        .text_color(theme.on_primary)
         .radius(RADIUS_2XL)
         .height(BTN_HEIGHT_XL)
         .padding(SPACE_8)
@@ -51,136 +50,11 @@ pub fn btn_xl(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
         .into()
 }
 
-// Secondary — subtle filled
-pub fn btn_secondary(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_secondary(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::SURFACE_2)
-        .hover_bg(light::SURFACE_3)
-        .text_color(light::TEXT)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-pub fn btn_secondary_sm(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(light::SURFACE_2)
-        .hover_bg(light::SURFACE_3)
-        .text_color(light::TEXT)
-        .radius(RADIUS_LG)
-        .height(BTN_HEIGHT_SM)
-        .padding(SPACE_3)
-        .font_size(TEXT_XS)
-        .into()
-}
-
-// Ghost — no background until hover
-pub fn btn_ghost(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(Color::TRANSPARENT)
-        .hover_bg(light::SURFACE_2)
-        .text_color(light::TEXT)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-pub fn btn_ghost_sm(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(Color::TRANSPARENT)
-        .hover_bg(light::SURFACE_2)
-        .text_color(light::TEXT)
-        .radius(RADIUS_LG)
-        .height(BTN_HEIGHT_SM)
-        .padding(SPACE_3)
-        .font_size(TEXT_XS)
-        .into()
-}
-
-pub fn btn_ghost_muted(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(Color::TRANSPARENT)
-        .hover_bg(light::SURFACE_2)
-        .text_color(light::TEXT_MUTED)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-// Danger
-pub fn btn_danger(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(light::DANGER)
-        .hover_bg(light::DANGER_HOVER)
-        .text_color(Color::WHITE)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-pub fn btn_danger_sm(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(light::DANGER)
-        .hover_bg(light::DANGER_HOVER)
-        .text_color(Color::WHITE)
-        .radius(RADIUS_LG)
-        .height(BTN_HEIGHT_SM)
-        .padding(SPACE_3)
-        .font_size(TEXT_XS)
-        .into()
-}
-
-pub fn btn_danger_ghost(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(Color::TRANSPARENT)
-        .hover_bg(light::DANGER_BG)
-        .text_color(light::DANGER)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-// Success
-pub fn btn_success(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(light::SUCCESS)
-        .hover_bg(crate::colors::GREEN_700)
-        .text_color(Color::WHITE)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-// Dark theme variants
-pub fn btn_dark(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(dark::ACCENT)
-        .hover_bg(dark::ACCENT_HOVER)
-        .text_color(dark::ACCENT_FG)
-        .radius(RADIUS_XL)
-        .height(BTN_HEIGHT_MD)
-        .padding(SPACE_4)
-        .font_size(TEXT_SM)
-        .into()
-}
-
-pub fn btn_dark_secondary(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
-    button(label, on_click)
-        .bg(dark::SURFACE_2)
+        .bg(theme.surface)
         .hover_bg(dark::SURFACE_3)
-        .text_color(dark::TEXT)
+        .text_color(theme.text)
         .radius(RADIUS_XL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_4)
@@ -188,11 +62,23 @@ pub fn btn_dark_secondary(label: impl Into<String>, on_click: impl Fn() + 'stati
         .into()
 }
 
-pub fn btn_dark_ghost(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_secondary_sm(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+    button(label, on_click)
+        .bg(theme.surface)
+        .hover_bg(dark::SURFACE_3)
+        .text_color(theme.text)
+        .radius(RADIUS_LG)
+        .height(BTN_HEIGHT_SM)
+        .padding(SPACE_3)
+        .font_size(TEXT_XS)
+        .into()
+}
+
+pub fn btn_ghost(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
         .bg(Color::TRANSPARENT)
-        .hover_bg(dark::SURFACE_2)
-        .text_color(dark::TEXT)
+        .hover_bg(theme.surface)
+        .text_color(theme.text)
         .radius(RADIUS_XL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_4)
@@ -200,11 +86,23 @@ pub fn btn_dark_ghost(label: impl Into<String>, on_click: impl Fn() + 'static) -
         .into()
 }
 
-pub fn btn_dark_ghost_muted(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_ghost_sm(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
         .bg(Color::TRANSPARENT)
-        .hover_bg(dark::SURFACE_2)
-        .text_color(dark::TEXT_MUTED)
+        .hover_bg(theme.surface)
+        .text_color(theme.text)
+        .radius(RADIUS_LG)
+        .height(BTN_HEIGHT_SM)
+        .padding(SPACE_3)
+        .font_size(TEXT_XS)
+        .into()
+}
+
+pub fn btn_ghost_muted(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+    button(label, on_click)
+        .bg(Color::TRANSPARENT)
+        .hover_bg(theme.surface)
+        .text_color(theme.text_muted)
         .radius(RADIUS_XL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_4)
@@ -212,7 +110,7 @@ pub fn btn_dark_ghost_muted(label: impl Into<String>, on_click: impl Fn() + 'sta
         .into()
 }
 
-pub fn btn_dark_danger(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_danger(_theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
         .bg(dark::DANGER)
         .hover_bg(dark::DANGER_HOVER)
@@ -224,7 +122,42 @@ pub fn btn_dark_danger(label: impl Into<String>, on_click: impl Fn() + 'static) 
         .into()
 }
 
-// Custom — build your own button style
+pub fn btn_danger_sm(_theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+    button(label, on_click)
+        .bg(dark::DANGER)
+        .hover_bg(dark::DANGER_HOVER)
+        .text_color(Color::WHITE)
+        .radius(RADIUS_LG)
+        .height(BTN_HEIGHT_SM)
+        .padding(SPACE_3)
+        .font_size(TEXT_XS)
+        .into()
+}
+
+pub fn btn_danger_ghost(_theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+    button(label, on_click)
+        .bg(Color::TRANSPARENT)
+        .hover_bg(dark::DANGER_BG)
+        .text_color(dark::DANGER)
+        .radius(RADIUS_XL)
+        .height(BTN_HEIGHT_MD)
+        .padding(SPACE_4)
+        .font_size(TEXT_SM)
+        .into()
+}
+
+pub fn btn_success(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+    button(label, on_click)
+        .bg(dark::SUCCESS)
+        .hover_bg(crate::colors::GREEN_700)
+        .text_color(Color::WHITE)
+        .radius(RADIUS_XL)
+        .height(BTN_HEIGHT_MD)
+        .padding(SPACE_4)
+        .font_size(TEXT_SM)
+        .into()
+}
+
 pub struct BtnStyle {
     pub bg: Color,
     pub hover_bg: Color,
@@ -265,12 +198,11 @@ pub fn btn_styled(
         .into()
 }
 
-// Pill-shaped buttons
-pub fn btn_pill(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_pill(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::ACCENT)
-        .hover_bg(light::ACCENT_HOVER)
-        .text_color(light::ACCENT_FG)
+        .bg(theme.primary)
+        .hover_bg(with_opacity(theme.primary, 0.85))
+        .text_color(theme.on_primary)
         .radius(RADIUS_FULL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_5)
@@ -278,11 +210,11 @@ pub fn btn_pill(label: impl Into<String>, on_click: impl Fn() + 'static) -> View
         .into()
 }
 
-pub fn btn_pill_secondary(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_pill_secondary(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
-        .bg(light::SURFACE_2)
-        .hover_bg(light::SURFACE_3)
-        .text_color(light::TEXT)
+        .bg(theme.surface)
+        .hover_bg(dark::SURFACE_3)
+        .text_color(theme.text)
         .radius(RADIUS_FULL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_5)
@@ -290,11 +222,11 @@ pub fn btn_pill_secondary(label: impl Into<String>, on_click: impl Fn() + 'stati
         .into()
 }
 
-pub fn btn_pill_ghost(label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
+pub fn btn_pill_ghost(theme: &Theme, label: impl Into<String>, on_click: impl Fn() + 'static) -> View {
     button(label, on_click)
         .bg(Color::TRANSPARENT)
-        .hover_bg(light::SURFACE_2)
-        .text_color(light::TEXT)
+        .hover_bg(theme.surface)
+        .text_color(theme.text)
         .radius(RADIUS_FULL)
         .height(BTN_HEIGHT_MD)
         .padding(SPACE_5)
@@ -302,7 +234,6 @@ pub fn btn_pill_ghost(label: impl Into<String>, on_click: impl Fn() + 'static) -
         .into()
 }
 
-// Colored buttons from palette
 pub fn btn_colored(
     label: impl Into<String>,
     bg: Color,
