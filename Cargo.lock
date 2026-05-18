@@ -330,7 +330,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "demo-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
  "hot-glyph",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "github-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
  "dirs",
@@ -898,7 +898,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
 name = "hot-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
  "libloading",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "native-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
  "objc2",
@@ -1916,7 +1916,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "platform-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
  "hot-glyph",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "render-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "core-glyph",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "text-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "core-glyph",
@@ -2961,7 +2961,7 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "ui-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
 ]
@@ -3397,7 +3397,7 @@ checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "widgets-glyph"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-glyph",
 ]

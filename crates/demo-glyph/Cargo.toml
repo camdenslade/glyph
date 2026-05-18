@@ -1,6 +1,6 @@
 [package]
 name = "demo-glyph"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 default-run = "demo-glyph"
 
@@ -18,11 +18,11 @@ name = "demo_glyph"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-core-glyph     = { version = "0.1.0", path = "../core-glyph" }
-platform-glyph = { version = "0.1.0", path = "../platform-glyph" }
-widgets-glyph  = { version = "0.1.0", path = "../widgets-glyph" }
-ui-glyph       = { version = "0.1.0", path = "../ui-glyph" }
-hot-glyph      = { version = "0.1.0", path = "../hot-glyph", optional = true }
+core-glyph     = { version = "0.1.1", path = "../core-glyph" }
+platform-glyph = { version = "0.1.1", path = "../platform-glyph" }
+widgets-glyph  = { version = "0.1.1", path = "../widgets-glyph" }
+ui-glyph       = { version = "0.1.1", path = "../ui-glyph" }
+hot-glyph      = { version = "0.1.1", path = "../hot-glyph", optional = true }
 taffy          = "0.5"
 
 [features]

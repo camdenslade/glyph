@@ -1,15 +1,15 @@
 [package]
 name = "platform-glyph"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "winit event loop, hit-test, and input dispatch for the Glyph UI framework"
 repository = "https://github.com/camdenslade/glyph"
 license = "MIT"
 
 [dependencies]
-core-glyph = { version = "0.1.0", path = "../core-glyph" }
-render-glyph = { version = "0.1.0", path = "../render-glyph" }
-hot-glyph = { version = "0.1.0", path = "../hot-glyph", optional = true }
+core-glyph = { version = "0.1.1", path = "../core-glyph" }
+render-glyph = { version = "0.1.1", path = "../render-glyph" }
+hot-glyph = { version = "0.1.1", path = "../hot-glyph", optional = true }
 winit    = "0.30"
 wgpu     = "22"
 pollster = "0.3"

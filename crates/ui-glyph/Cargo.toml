@@ -1,10 +1,10 @@
 [package]
 name = "ui-glyph"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Design system: color palette, spacing tokens, typography, and component library for Glyph"
 repository = "https://github.com/camdenslade/glyph"
 license = "MIT"
 
 [dependencies]
-core-glyph = { version = "0.1.0", path = "../core-glyph" }
+core-glyph = { version = "0.1.1", path = "../core-glyph" }
