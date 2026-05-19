@@ -337,7 +337,7 @@ pub use icons::*;
 
 // Themes
 pub use themes::{
-    dark_theme, github_dark_theme, light_theme, minimal_light_theme, slate_dark_theme,
+    charcoal_dark_theme, dark_theme, github_dark_theme, light_theme, minimal_light_theme, slate_dark_theme,
 };
 
 // Semantic color namespaces re-exported for convenience

@@ -28,7 +28,10 @@ pub fn measure_text(font_system: &mut FontSystem, text: &str, font_size: f32, ma
     buffer.shape_until_scroll(font_system, false);
 
     let runs: Vec<_> = buffer.layout_runs().collect();
-    let width = runs.iter().map(|r| r.line_w).fold(0.0_f32, f32::max);
+    // Ceil to the next pixel so the layout node is never narrower than the shaped
+    // content — prevents cosmic-text from wrapping the last character when the
+    // node width matches line_w exactly at subpixel precision.
+    let width = runs.iter().map(|r| r.line_w).fold(0.0_f32, f32::max).ceil();
     let height = runs.len() as f32 * line_height;
     (width, height.max(line_height))
 }
@@ -75,7 +78,7 @@ impl TextRenderer {
         );
         buffer.shape_until_scroll(&mut self.font_system, false);
         let runs: Vec<_> = buffer.layout_runs().collect();
-        let width = runs.iter().map(|r| r.line_w).fold(0.0_f32, f32::max);
+        let width = runs.iter().map(|r| r.line_w).fold(0.0_f32, f32::max).ceil();
         let height = runs.len() as f32 * line_height;
         (width, height.max(line_height))
     }

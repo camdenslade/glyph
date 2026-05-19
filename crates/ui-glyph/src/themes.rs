@@ -65,6 +65,21 @@ pub fn github_dark_theme() -> Theme {
     }
 }
 
+pub fn charcoal_dark_theme() -> Theme {
+    Theme {
+        background: Color::rgb(0.102, 0.106, 0.110),   // #1A1B1C
+        surface: Color::rgb(0.133, 0.137, 0.145),       // #222326
+        primary: Color::rgb(0.714, 0.737, 0.773),       // #B6BBC5  charcoal accent
+        on_primary: Color::rgb(0.102, 0.106, 0.110),
+        text: Color::rgb(0.898, 0.906, 0.922),          // #E5E7EB
+        text_muted: Color::rgb(0.502, 0.522, 0.557),    // #808590
+        border: Color::rgb(0.216, 0.220, 0.231),        // #373840
+        border_focused: Color::rgb(0.600, 0.620, 0.655),// #999EA7
+        radius: 6.0,
+        font_size: 14.0,
+    }
+}
+
 pub fn minimal_light_theme() -> Theme {
     Theme {
         background: Color::WHITE,
