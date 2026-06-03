@@ -139,6 +139,30 @@ fn main() {{
         ),
     )?;
 
+    // build.rs — embeds the DPI-aware manifest on Windows at compile time
+    std::fs::write(dir.join("build.rs"),
+        "fn main() {\n\
+         #[cfg(target_os = \"windows\")]\n\
+         {\n\
+             let manifest = \"<?xml version=\\\"1.0\\\" encoding=\\\"UTF-8\\\" standalone=\\\"yes\\\"?>\\n\
+<assembly xmlns=\\\"urn:schemas-microsoft-com:asm.v1\\\" manifestVersion=\\\"1.0\\\">\\n\
+  <application xmlns=\\\"urn:schemas-microsoft-com:asm.v3\\\">\\n\
+    <windowsSettings>\\n\
+      <dpiAwareness xmlns=\\\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\\\">PerMonitorV2</dpiAwareness>\\n\
+      <activeCodePage xmlns=\\\"http://schemas.microsoft.com/SMI/2019/WindowsSettings\\\">UTF-8</activeCodePage>\\n\
+    </windowsSettings>\\n\
+  </application>\\n\
+</assembly>\\n\";\n\
+             let out = std::env::var(\"OUT_DIR\").unwrap();\n\
+             let path = std::path::Path::new(&out).join(\"app.manifest\");\n\
+             std::fs::write(&path, manifest).unwrap();\n\
+             println!(\"cargo:rustc-link-arg-bins=/MANIFEST:EMBED\");\n\
+             println!(\"cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}\", path.display());\n\
+         }\n\
+         println!(\"cargo:rerun-if-changed=build.rs\");\n\
+         }\n"
+    )?;
+
     // .gitignore
     std::fs::write(dir.join(".gitignore"), "/target\n")?;
 
