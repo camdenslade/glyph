@@ -400,7 +400,7 @@ impl ApplicationHandler for App {
                     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
                     if let Ok(handle) = window.window_handle() {
                         if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                            install_menu_windows(mb, h.hwnd.get() as isize);
+                            install_menu_windows(mb, h.hwnd.get());
                         }
                     }
                 }
