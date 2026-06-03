@@ -1,9 +1,13 @@
 [package]
 name = "glyph-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "CLI tool for creating, building, and packaging Glyph desktop apps"
 license = "MIT"
+repository  = "https://github.com/camdenslade/glyph"
+homepage    = "https://glyphui.dev"
+keywords    = ["gui", "ui", "desktop", "gpu", "native"]
+categories  = ["gui", "graphics"]
 
 [[bin]]
 name = "glyph"

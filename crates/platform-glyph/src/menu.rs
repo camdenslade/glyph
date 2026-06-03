@@ -12,11 +12,12 @@ use muda::{
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+type HandlerMap = Arc<Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>>;
 
 /// A declarative native menu bar definition. Pass to `AppBuilder::menu()`.
 pub struct MenuBar {
     pub(crate) inner: Menu,
-    pub(crate) handlers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>>,
+    pub(crate) handlers: HandlerMap,
 }
 
 impl MenuBar {
@@ -46,16 +47,16 @@ impl Default for MenuBar {
 pub struct SubMenuBuilder {
     label: String,
     items: Vec<muda::MenuItemKind>,
-    handlers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>>,
+    handlers: HandlerMap,
 }
 
 pub(crate) struct SubMenuBuilt {
     pub submenu: Submenu,
-    pub handlers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>>,
+    pub handlers: HandlerMap,
 }
 
 impl SubMenuBuilder {
-    fn new(label: &str, handlers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>>) -> Self {
+    fn new(label: &str, handlers: HandlerMap) -> Self {
         Self { label: label.to_string(), items: vec![], handlers }
     }
 
@@ -204,7 +205,7 @@ pub fn install_menu_windows(menu: &MenuBar, hwnd: isize) {
 pub fn install_menu_windows(_menu: &MenuBar, _hwnd: isize) {}
 
 /// Drain pending menu events and fire registered callbacks.
-pub fn poll_menu_events(handlers: &Arc<Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>>) {
+pub fn poll_menu_events(handlers: &HandlerMap) {
     while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
         let id = event.id().0.to_string();
         if let Some(f) = handlers.lock().unwrap().get(&id) {

@@ -1,16 +1,19 @@
 [package]
 name = "hot-glyph"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Hot-reload dylib loader for the Glyph UI framework"
 repository = "https://github.com/camdenslade/glyph"
 license = "MIT"
+homepage    = "https://glyphui.dev"
+keywords    = ["gui", "ui", "desktop", "gpu", "native"]
+categories  = ["gui", "graphics"]
 
 [lib]
 name = "hot_glyph"
 
 [dependencies]
-core-glyph = { version = "0.1.1", path = "../core-glyph" }
+core-glyph = { version = "0.2.0", path = "../core-glyph" }
 libloading  = "0.8"
 notify      = "6"
 taffy       = "0.5"

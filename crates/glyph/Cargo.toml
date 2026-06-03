@@ -1,15 +1,19 @@
 [package]
-name = "glyph"
-version = "0.1.0"
-edition = "2021"
-description = "A GPU-native desktop app framework for Rust"
-license = "MIT"
+name        = "glyph"
+version     = "0.2.0"
+edition     = "2021"
+description = "A GPU-native desktop app framework for Rust — one crate, one import"
+repository  = "https://github.com/camdenslade/glyph"
+homepage    = "https://glyphui.dev"
+license     = "MIT"
+keywords    = ["gui", "ui", "desktop", "native", "gpu"]
+categories  = ["gui", "graphics", "rendering"]
 
 [dependencies]
-core-glyph   = { path = "../core-glyph" }
-platform-glyph = { path = "../platform-glyph" }
-ui-glyph     = { path = "../ui-glyph" }
+core-glyph     = { version = "0.2.0", path = "../core-glyph" }
+platform-glyph = { version = "0.2.0", path = "../platform-glyph" }
+ui-glyph       = { version = "0.2.0", path = "../ui-glyph" }
 
 [features]
-default = []
+default    = []
 hot-reload = ["platform-glyph/hot-reload"]

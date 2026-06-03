@@ -196,6 +196,7 @@ pub fn pagination(
 }
 
 
+#[allow(clippy::type_complexity)]
 pub fn breadcrumb_nav(
     theme: &Theme,
     segments: Vec<(impl Into<String>, Option<Box<dyn Fn()>>)>,
