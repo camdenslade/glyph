@@ -38,12 +38,12 @@ pub mod prelude {
     };
 
     // Reactive state
-    pub use core_glyph::{Signal, needs_redraw, clear_redraw};
+    pub use core_glyph::{Signal, needs_redraw, clear_redraw, scroll_to_y, scroll_to_top, scroll_to_bottom};
 
     // View primitives
     pub use core_glyph::{
-        button, button_view, column, flex, flexible, image, opacity, rect,
-        row, scroll, spacer, text, text_area, text_input, virtual_list, zstack,
+        button, button_view, column, flex, flexible, image, opacity, portal, rect,
+        row, scroll, slider_input, spacer, text, text_area, text_input, virtual_list, zstack,
     };
 
     // View builder types (for method chaining without `.into()` at every call)

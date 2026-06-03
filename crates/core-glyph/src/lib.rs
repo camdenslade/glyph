@@ -21,12 +21,12 @@ pub use widget::{NativeHint, Widget};
 pub use taffy::{AlignItems, JustifyContent};
 pub use layout::{FlatView, FlatViewKind, ViewTree};
 pub use taffy::Layout as TaffyLayout;
-pub use signal::{Signal, clear_redraw, needs_redraw};
+pub use signal::{Signal, clear_redraw, needs_redraw, scroll_to_y, scroll_to_top, scroll_to_bottom};
 pub use theme::Theme;
 pub use view::{
     ButtonView, Color, ColumnView, FontFamily, FontWeight, ImageView, Lerp, RectView, RowView, ScrollView, Shadow,
-    TextAlign, TextAreaView, TextInputView, TextView, View, VirtualListView, ZStackView,
-    button, button_view, column, flex, flexible, image, list, opacity, rect, row, scroll, spacer, text, text_area, text_input, virtual_list, zstack,
+    SliderInputView, TextAlign, TextAreaView, TextInputView, TextView, View, VirtualListView, ZStackView,
+    button, button_view, column, flex, flexible, image, list, opacity, portal, rect, row, scroll, slider_input, spacer, text, text_area, text_input, virtual_list, zstack,
 };
 pub use router::Router;
 pub use node::{LayoutNode, LayoutProps, NodeKind, StyleProps};

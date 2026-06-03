@@ -48,6 +48,31 @@ impl<T: Clone> Signal<T> {
     }
 }
 
+impl Signal<f32> {
+    /// Clamp `value` to `[0, max]` then set. No-op if `max < 0` (not yet measured).
+    pub fn set_clamped(&self, value: f32, max: f32) {
+        self.set(value.clamp(0.0, max.max(0.0)));
+    }
+}
+
+/// Scroll a container to an absolute Y position, clamped to the measured content height.
+/// `offset_y` and `max_scroll` are the signals passed to `scroll()`.
+pub fn scroll_to_y(offset_y: &Signal<f32>, max_scroll: &Signal<(f32, f32)>, y: f32) {
+    let max = max_scroll.get().1;
+    offset_y.set(y.clamp(0.0, max.max(0.0)));
+}
+
+/// Scroll to the top of a scroll container.
+pub fn scroll_to_top(offset_y: &Signal<f32>) {
+    offset_y.set(0.0);
+}
+
+/// Scroll to the bottom of a scroll container.
+pub fn scroll_to_bottom(offset_y: &Signal<f32>, max_scroll: &Signal<(f32, f32)>) {
+    let max = max_scroll.get().1;
+    offset_y.set(max.max(0.0));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

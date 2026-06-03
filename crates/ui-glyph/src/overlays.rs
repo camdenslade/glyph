@@ -1,14 +1,14 @@
 //! Overlay components: Modal/Dialog, Alert Dialog, Drawer/Sheet, Popover skeleton,
 //! Toast notification, Accordion, Collapsible, HoverCard skeleton.
 //!
-//! Since we have no portal layer, overlays are rendered inline by the caller
-//! and should be placed in a ZStack or at the root column level.
+//! Overlays use `portal()` so they render above all content regardless of
+//! where they appear in the view tree.
 
 use crate::colors::{dark, with_opacity};
 use crate::icons::{icon_alert_circle_outline, icon_checkmark_circle_outline, icon_close_outline, icon_information_circle_outline, icon_warning_outline};
 use crate::spacing::*;
 use core_glyph::{
-    button, button_view, column, rect, row, spacer, text, zstack,
+    button, button_view, column, portal, rect, row, spacer, text, zstack,
     Color, FontWeight, Shadow, Signal, Theme, View,
 };
 
@@ -64,20 +64,18 @@ pub fn modal(
     on_close: impl Fn() + 'static,
     width: f32,
 ) -> View {
-    zstack(vec![
-        // Backdrop
+    let inner: View = zstack(vec![
         button_view(
             column(vec![]).fill_width().fill_height().bg(Color::rgba(0.0, 0.0, 0.0, 0.6)).into(),
             on_close,
         )
         .bg(Color::TRANSPARENT).hover_bg(Color::TRANSPARENT).fill_width().grow().into(),
-        // Panel — centered
         column(vec![
             dialog(theme, title, body, actions, width),
         ])
         .fill_width().fill_height().align_center().justify_center().into(),
-    ])
-    .into()
+    ]).into();
+    portal(inner)
 }
 
 
@@ -121,10 +119,12 @@ pub fn drawer_right(
     width: f32,
     on_close: impl Fn() + 'static,
 ) -> View {
+    let on_close = std::sync::Arc::new(on_close);
+    let on_close2 = std::sync::Arc::clone(&on_close);
     zstack(vec![
         button_view(
             column(vec![]).fill_width().fill_height().bg(Color::rgba(0.0, 0.0, 0.0, 0.5)).into(),
-            on_close,
+            move || on_close(),
         )
         .bg(Color::TRANSPARENT).hover_bg(Color::TRANSPARENT).fill_width().grow().into(),
         row(vec![
@@ -135,7 +135,7 @@ pub fn drawer_right(
                     spacer(),
                     button_view(
                         icon_close_outline(theme.text_muted, 16.0),
-                        || {},
+                        move || on_close2(),
                     )
                     .bg(Color::TRANSPARENT).hover_bg(dark::SURFACE_2)
                     .width(BTN_HEIGHT_SM).height(BTN_HEIGHT_SM).radius(RADIUS_MD).into(),
@@ -293,28 +293,30 @@ pub fn toast_stack(toasts: Vec<View>) -> View {
 
 /// A floating popover panel (positioned by caller in a ZStack).
 pub fn popover(theme: &Theme, body: Vec<View>) -> View {
-    column(body)
+    let inner: View = column(body)
         .gap(SPACE_2).padding(SPACE_3)
         .bg(theme.surface).border(theme.border, 1.0).radius(RADIUS_XL)
         .shadow(Shadow { offset_x: 0.0, offset_y: 8.0, blur: 24.0, color: Color::rgba(0.0,0.0,0.0,0.4) })
-        .into()
+        .into();
+    portal(inner)
 }
 
-/// Tooltip panel (minimal, no arrow).
+/// Tooltip panel — renders above all content via portal.
 pub fn tooltip_panel(content: impl Into<String>) -> View {
-    row(vec![text(content, TEXT_XS).color(Color::WHITE).into()])
+    let inner: View = row(vec![text(content, TEXT_XS).color(Color::WHITE).into()])
         .padding_x(SPACE_2).padding_y(SPACE_1)
         .bg(Color::rgba(0.0, 0.0, 0.0, 0.85))
-        .radius(RADIUS_MD).into()
+        .radius(RADIUS_MD).into();
+    portal(inner)
 }
 
-
 pub fn dropdown_menu(theme: &Theme, items: Vec<View>) -> View {
-    column(items)
+    let inner: View = column(items)
         .gap(2.0).padding(SPACE_1)
         .bg(theme.surface).border(theme.border, 1.0).radius(RADIUS_LG)
         .shadow(Shadow { offset_x: 0.0, offset_y: 8.0, blur: 20.0, color: Color::rgba(0.0,0.0,0.0,0.4) })
-        .into()
+        .into();
+    portal(inner)
 }
 
 pub fn menu_item(theme: &Theme, label: impl Into<String>, icon: Option<View>, on_click: impl Fn() + 'static) -> View {

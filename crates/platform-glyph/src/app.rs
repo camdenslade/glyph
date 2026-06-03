@@ -104,6 +104,7 @@ struct HitItem {
 enum HitKind {
     Button(bool),
     Text,
+    Slider,
 }
 
 #[derive(Default)]
@@ -153,6 +154,8 @@ struct WindowState {
     scroll_dirty: bool,
     /// Cached VirtualList row ranges: (offset_y, first_row, last_row) per list.
     vlist_ranges: Vec<f32>,
+    /// Active slider drag: flat index of the slider being dragged.
+    dragging_slider: Option<usize>,
 }
 
 impl WindowState {
@@ -368,6 +371,7 @@ impl App {
                 text_edit: TextEditState::default(),
                 scroll_dirty: false,
                 vlist_ranges: Vec::new(),
+                    dragging_slider: None,
             },
         );
     }
@@ -434,6 +438,7 @@ impl ApplicationHandler for App {
                     text_edit: TextEditState::default(),
                     scroll_dirty: false,
                     vlist_ranges: Vec::new(),
+                    dragging_slider: None,
                 },
             );
         }
@@ -574,6 +579,21 @@ impl ApplicationHandler for App {
                             if hit {
                                 icon = CursorIcon::Text;
                             }
+                        }
+                        HitKind::Slider => {
+                            if hit { icon = CursorIcon::EwResize; }
+                        }
+                    }
+                }
+                // Fire active slider drag on mouse move.
+                if let Some(drag_idx) = ws.dragging_slider {
+                    if let Some(fv) = ws.scaled_cache.get(drag_idx) {
+                        if let FlatViewKind::Slider { on_drag, .. } = &fv.kind {
+                            let l = fv.layout.location.x;
+                            let w = fv.layout.size.width;
+                            let norm = ((px - l) / w).clamp(0.0, 1.0);
+                            on_drag(norm);
+                            ws.window.request_redraw();
                         }
                     }
                 }
@@ -744,8 +764,9 @@ impl ApplicationHandler for App {
                         && cy <= t + fv.layout.size.height;
                     match &fv.kind {
                         FlatViewKind::Button {
-                            on_click, on_press, ..
+                            on_click, on_press, disabled, ..
                         } => {
+                            if *disabled { continue; }
                             if hit {
                                 if let Some(op) = on_press {
                                     op(pressed);
@@ -765,8 +786,10 @@ impl ApplicationHandler for App {
                             cursor,
                             value,
                             font_size,
+                            disabled,
                             ..
                         } if pressed => {
+                            if *disabled { continue; }
                             focused.set(hit);
                             ws.window.set_ime_allowed(hit);
                             if hit {
@@ -824,6 +847,15 @@ impl ApplicationHandler for App {
                                 byte_offset += line_cursor;
                                 cursor.set(byte_offset.min(val.len()));
                             }
+                        }
+                        FlatViewKind::Slider { on_drag, .. } if pressed && hit => {
+                            // Start drag: compute initial value from click x position.
+                            let norm = ((cx - l) / fv.layout.size.width).clamp(0.0, 1.0);
+                            on_drag(norm);
+                            ws.dragging_slider = Some(idx);
+                        }
+                        FlatViewKind::Slider { .. } if !pressed => {
+                            ws.dragging_slider = None;
                         }
                         _ => {}
                     }
@@ -947,9 +979,10 @@ impl ApplicationHandler for App {
                             cursor,
                             on_change,
                             on_submit,
+                            disabled,
                             ..
                         } => {
-                            if !focused.get() {
+                            if !focused.get() || *disabled {
                                 continue;
                             }
                             ws.text_edit.focused_flat_index = Some(idx);
@@ -1298,6 +1331,13 @@ impl ApplicationHandler for App {
                                         h,
                                         kind: HitKind::Text,
                                     }),
+                                    FlatViewKind::Slider { .. } => Some(HitItem {
+                                        x,
+                                        y,
+                                        w,
+                                        h,
+                                        kind: HitKind::Slider,
+                                    }),
                                     _ => None,
                                 };
                                 if let Some(item) = item {
@@ -1490,6 +1530,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     font_size,
                     wrap,
                     family,
+                    disabled,
                 } => FlatViewKind::Button {
                     label,
                     on_click,
@@ -1503,6 +1544,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     font_size: font_size * scale,
                     wrap,
                     family,
+                    disabled,
                 },
                 FlatViewKind::TextInput {
                     value,
@@ -1519,6 +1561,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     on_submit,
                     selection,
                     composing,
+                    disabled,
                 } => FlatViewKind::TextInput {
                     value,
                     focused,
@@ -1534,6 +1577,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     on_submit,
                     selection,
                     composing,
+                    disabled,
                 },
                 FlatViewKind::ContainerRect {
                     bg_color,
@@ -1578,6 +1622,7 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
                     corner_radius: corner_radius * scale,
                     tint,
                 },
+                FlatViewKind::Slider { value, on_drag } => FlatViewKind::Slider { value, on_drag },
                 FlatViewKind::TextArea {
                     value,
                     focused,

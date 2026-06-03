@@ -137,7 +137,8 @@ fn build_nsview(
             let view = unsafe { NSView::initWithFrame(mtm.alloc::<NSView>(), NSRect::ZERO) };
             unsafe { Retained::cast(view) }
         }
-        View::Scroll { child, .. } | View::Flexible { child, .. } | View::Opacity { child, .. } => build_nsview(mtm, child, targets),
+        View::Scroll { child, .. } | View::Flexible { child, .. } | View::Opacity { child, .. } | View::Portal { child } => build_nsview(mtm, child, targets),
+        View::Slider { .. } => unsafe { Retained::cast(NSView::initWithFrame(mtm.alloc::<NSView>(), NSRect::ZERO)) },
         View::ZStack { children, .. } => {
             stack_view(mtm, children, targets, NSUserInterfaceLayoutOrientation::Vertical)
         }

@@ -191,6 +191,7 @@ pub enum View {
         wrap: bool,
         family: FontFamily,
         style: Style,
+        disabled: bool,
     },
     Column {
         children: Vec<View>,
@@ -263,6 +264,7 @@ pub enum View {
         on_change: Option<Arc<dyn Fn(String)>>,
         on_submit: Option<Arc<dyn Fn(String)>>,
         style: Style,
+        disabled: bool,
     },
     /// A virtualized list that only builds row views for the visible range.
     VirtualList {
@@ -296,6 +298,19 @@ pub enum View {
     /// Multiplies the alpha of all descendant colors by `alpha`. Layout is
     /// pass-through — the child occupies exactly the same space as without this wrapper.
     Opacity { child: Box<View>, alpha: f32 },
+    /// A horizontal drag slider. The platform renders this as a track + thumb and
+    /// calls `on_drag` with a normalized `0.0–1.0` value during mouse drag.
+    Slider {
+        value: f32,
+        on_drag: Arc<dyn Fn(f32)>,
+        style: Style,
+    },
+    /// Renders `child` above the entire UI tree regardless of its position in the
+    /// view hierarchy. The portal node itself is invisible and zero-sized in the
+    /// flex layout — it does not affect the placement of any siblings. The child's
+    /// flat views are appended to the end of the frame's draw list so they paint
+    /// on top of everything else.
+    Portal { child: Box<View> },
 }
 
 /// Builder returned by [`text`]. Call `.into()` or `.into_view()` to finish.
@@ -530,6 +545,13 @@ impl ButtonView {
         self
     }
 
+    pub fn disabled(mut self, d: bool) -> Self {
+        if let View::Button { ref mut disabled, .. } = self.view {
+            *disabled = d;
+        }
+        self
+    }
+
     pub fn into_view(self) -> View {
         self.view
     }
@@ -572,6 +594,7 @@ pub fn button(label: impl Into<String>, on_click: impl Fn() + 'static) -> Button
             font_size: 16.0,
             wrap: false,
             family: FontFamily::SansSerif,
+            disabled: false,
             style: Style {
                 padding: taffy::Rect::length(12.0),
                 ..Default::default()
@@ -596,6 +619,7 @@ pub fn button_view(child: View, on_click: impl Fn() + 'static) -> ButtonView {
             font_size: 16.0,
             wrap: false,
             family: FontFamily::SansSerif,
+            disabled: false,
             style: Style {
                 padding: taffy::Rect::length(8.0),
                 ..Default::default()
@@ -1467,6 +1491,13 @@ impl TextInputView {
         }
         self
     }
+
+    pub fn disabled(mut self, d: bool) -> Self {
+        if let View::TextInput { ref mut disabled, .. } = self.view {
+            *disabled = d;
+        }
+        self
+    }
 }
 
 impl From<TextInputView> for View {
@@ -1496,6 +1527,7 @@ pub fn text_input(
             corner_radius: 6.0,
             on_change: None,
             on_submit: None,
+            disabled: false,
             style: Style {
                 size: taffy::Size {
                     width: taffy::Dimension::Length(240.0),
@@ -1657,6 +1689,60 @@ pub fn opacity(alpha: f32, child: impl Into<View>) -> View {
         child: Box::new(child.into()),
         alpha,
     }
+}
+
+/// Render `child` above all other content regardless of where it sits in the
+/// view tree. The portal node has zero size in the layout — siblings are
+/// unaffected. Use this for dropdowns, tooltips, and modals.
+pub fn portal(child: impl Into<View>) -> View {
+    View::Portal { child: Box::new(child.into()) }
+}
+
+/// An interactive horizontal slider. `value` is in `[0, 1]`. `on_drag` receives
+/// the new normalized value as the user drags the thumb.
+pub fn slider_input(value: f32, on_drag: impl Fn(f32) + 'static) -> SliderInputView {
+    SliderInputView {
+        view: View::Slider {
+            value: value.clamp(0.0, 1.0),
+            on_drag: Arc::new(on_drag),
+            style: Style {
+                size: taffy::Size {
+                    width: taffy::Dimension::Length(200.0),
+                    height: taffy::Dimension::Length(20.0),
+                },
+                ..Default::default()
+            },
+        },
+    }
+}
+
+pub struct SliderInputView {
+    view: View,
+}
+
+impl SliderInputView {
+    pub fn width(mut self, w: f32) -> Self {
+        if let View::Slider { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Length(w);
+        }
+        self
+    }
+    pub fn fill_width(mut self) -> Self {
+        if let View::Slider { ref mut style, .. } = self.view {
+            style.size.width = taffy::Dimension::Percent(1.0);
+        }
+        self
+    }
+    pub fn height(mut self, h: f32) -> Self {
+        if let View::Slider { ref mut style, .. } = self.view {
+            style.size.height = taffy::Dimension::Length(h);
+        }
+        self
+    }
+}
+
+impl From<SliderInputView> for View {
+    fn from(s: SliderInputView) -> Self { s.view }
 }
 
 /// Builder returned by [`scroll`]. Call `.into()` to finish.

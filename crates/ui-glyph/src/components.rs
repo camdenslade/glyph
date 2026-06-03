@@ -3,8 +3,8 @@ use crate::layout::divider;
 use crate::shadows::{shadow_dark_md, shadow_md, shadow_sm};
 use crate::spacing::*;
 use core_glyph::{
-    button, column, flex, flexible, image, rect, row, spacer, text, AlignItems, Color, FontWeight,
-    JustifyContent, Shadow, Theme, View,
+    button, button_view, column, flex, flexible, image, rect, row, spacer, text,
+    AlignItems, Color, FontWeight, JustifyContent, Shadow, Theme, View,
 };
 
 // Card — the fundamental surface container
@@ -352,14 +352,7 @@ pub fn stat_card_with_change(
 
 // Progress bar
 pub fn progress(value: f32, max: f32, color: Color) -> View {
-    let _pct = (value / max).clamp(0.0, 1.0);
-    row(vec![flexible(
-        rect(color).height(6.0).radius(3.0).fill_width(),
-    )])
-    .fill_width()
-    .bg(dark::SURFACE_3)
-    .radius(3.0)
-    .into()
+    progress_bar((value / max).clamp(0.0, 1.0), color, dark::SURFACE_3, 6.0)
 }
 
 pub fn progress_bar(pct: f32, fg: Color, bg: Color, height: f32) -> View {
@@ -862,20 +855,26 @@ pub fn form_field(
 }
 
 // Checkbox-style toggle row (visual only — state managed by caller)
-pub fn toggle_row(theme: &Theme, label: impl Into<String>, enabled: bool, _on_click: impl Fn() + 'static) -> View {
-    let bg = if enabled {
-        theme.primary
-    } else {
-        dark::SURFACE_3
-    };
-    row(vec![
-        column(vec![rect(bg).width(36.0).height(20.0).radius(10.0).into()])
-            .width(36.0)
-            .height(20.0)
-            .into(),
-        text(label, TEXT_SM).color(theme.text).into(),
+pub fn toggle_row(theme: &Theme, label: impl Into<String>, enabled: bool, on_click: impl Fn() + 'static) -> View {
+    let bg = if enabled { theme.primary } else { dark::SURFACE_3 };
+    let thumb_x: f32 = if enabled { 18.0 } else { 2.0 };
+    let track: View = column(vec![
+        rect(Color::WHITE).width(14.0).height(14.0).radius(7.0).into(),
     ])
-    .gap(SPACE_3)
+    .width(34.0).height(18.0)
+    .bg(bg).radius(9.0)
+    .padding_x(thumb_x)
+    .align_center()
+    .into();
+    button_view(
+        row(vec![
+            track,
+            text(label, TEXT_SM).color(theme.text).into(),
+        ])
+        .gap(SPACE_3).align_center().into(),
+        on_click,
+    )
+    .bg(Color::TRANSPARENT).hover_bg(Color::TRANSPARENT)
     .into()
 }
 

@@ -52,6 +52,7 @@ pub enum FlatViewKind {
         font_size: f32,
         wrap: bool,
         family: FontFamily,
+        disabled: bool,
     },
     TextInput {
         value: Signal<String>,
@@ -68,6 +69,7 @@ pub enum FlatViewKind {
         corner_radius: f32,
         on_change: Option<Arc<dyn Fn(String)>>,
         on_submit: Option<Arc<dyn Fn(String)>>,
+        disabled: bool,
     },
     /// Begin a scissor clip region covering the given viewport rect.
     ClipStart {
@@ -117,6 +119,12 @@ pub enum FlatViewKind {
         corner_radius: f32,
         on_change: Option<Arc<dyn Fn(String)>>,
     },
+    /// An interactive slider track. The platform calls `on_drag` with a
+    /// normalized value in `[0, 1]` as the user drags.
+    Slider {
+        value: f32,
+        on_drag: Arc<dyn Fn(f32)>,
+    },
     /// A filled rectangle drawn before a container's children — used for
     /// container backgrounds, borders, and shadows.
     ContainerRect {
@@ -133,7 +141,8 @@ pub struct ViewTree;
 
 impl ViewTree {
     /// Expand all `Component` nodes (passing `theme` to each), run Taffy flexbox
-    /// layout, and return a flat list of positioned leaves.
+    /// layout, and return a flat list of positioned leaves followed by any portal
+    /// children (which paint above everything else).
     pub fn build(
         root: View,
         theme: &Theme,
@@ -157,7 +166,10 @@ impl ViewTree {
             )
             .expect("layout failed");
         let mut flat = Vec::new();
-        collect(&mut taffy, root_node, root, &mut flat, 0.0, 0.0, measure);
+        let mut portals = Vec::new();
+        collect(&mut taffy, root_node, root, &mut flat, &mut portals, 0.0, 0.0, measure);
+        // Portal children are appended last so they paint above everything.
+        flat.extend(portals);
         flat
     }
 }
@@ -283,6 +295,9 @@ fn expand(view: View, theme: &Theme) -> View {
             child: Box::new(expand(*child, theme)),
             alpha,
         },
+        View::Portal { child } => View::Portal {
+            child: Box::new(expand(*child, theme)),
+        },
         View::VirtualList { .. } => view,
         View::TextArea { .. } => view,
         other => other,
@@ -318,6 +333,8 @@ fn get_style(view: &View) -> taffy::Style {
             ..Default::default()
         },
         View::Opacity { child, .. } => get_style(child),
+        View::Portal { .. } => taffy::Style::default(),
+        View::Slider { style, .. } => style.clone(),
         View::Component(_) => taffy::Style::default(),
     }
 }
@@ -499,6 +516,12 @@ fn build_node(
             node
         }
         View::Opacity { child, .. } => build_node(taffy, child, measure),
+        View::Portal { .. } => taffy
+            .new_leaf_with_context(taffy::Style::default(), None)
+            .expect("taffy node"),
+        View::Slider { style, .. } => taffy
+            .new_leaf_with_context(style.clone(), None)
+            .expect("taffy node"),
         View::TextArea { style, .. } => taffy
             .new_leaf_with_context(style.clone(), None)
             .expect("taffy node"),
@@ -628,6 +651,7 @@ fn collect(
     node: NodeId,
     view: View,
     flat: &mut Vec<FlatView>,
+    portals: &mut Vec<FlatView>,
     parent_x: f32,
     parent_y: f32,
     measure: &mut dyn FnMut(&str, f32, f32) -> (f32, f32),
@@ -691,6 +715,7 @@ fn collect(
             font_size,
             wrap,
             family,
+            disabled,
             ..
         } => {
             flat.push(FlatView {
@@ -707,13 +732,14 @@ fn collect(
                     font_size,
                     wrap,
                     family,
+                    disabled,
                 },
                 layout: adjusted,
             });
             if let Some(child_view) = child {
                 let child_nodes = taffy.children(node).expect("children");
                 if let Some(&child_node) = child_nodes.first() {
-                    collect(taffy, child_node, *child_view, flat, x, y, measure);
+                    collect(taffy, child_node, *child_view, flat, portals, x, y, measure);
                 }
             }
         }
@@ -730,6 +756,7 @@ fn collect(
             corner_radius,
             on_change,
             on_submit,
+            disabled,
             ..
         } => {
             flat.push(FlatView {
@@ -748,6 +775,7 @@ fn collect(
                     corner_radius,
                     on_change,
                     on_submit,
+                    disabled,
                 },
                 layout: adjusted,
             });
@@ -799,7 +827,7 @@ fn collect(
             }
             let child_nodes = taffy.children(node).expect("children");
             for (child_node, child_view) in child_nodes.iter().zip(children) {
-                collect(taffy, *child_node, child_view, flat, x, y, measure);
+                collect(taffy, *child_node, child_view, flat, portals, x, y, measure);
             }
             if clip {
                 flat.push(FlatView {
@@ -831,7 +859,7 @@ fn collect(
             }
             let child_nodes = taffy.children(node).expect("children");
             for (child_node, child_view) in child_nodes.iter().zip(children) {
-                collect(taffy, *child_node, child_view, flat, x, y, measure);
+                collect(taffy, *child_node, child_view, flat, portals, x, y, measure);
             }
         }
         View::Scroll {
@@ -892,7 +920,7 @@ fn collect(
                 layout: adjusted,
             });
             // Pass x,y without offset — renderer applies scroll offset at draw time
-            collect(taffy, child_nodes[0], *child, flat, x, y, measure);
+            collect(taffy, child_nodes[0], *child, flat, portals, x, y, measure);
             flat.push(FlatView {
                 kind: FlatViewKind::ClipEnd,
                 layout: adjusted,
@@ -914,14 +942,14 @@ fn collect(
             });
         }
         View::Flexible { child, .. } => {
-            collect(taffy, node, *child, flat, parent_x, parent_y, measure);
+            collect(taffy, node, *child, flat, portals, parent_x, parent_y, measure);
         }
         View::Opacity { child, alpha } => {
             flat.push(FlatView {
                 kind: FlatViewKind::OpacityStart { alpha },
                 layout: adjusted,
             });
-            collect(taffy, node, *child, flat, parent_x, parent_y, measure);
+            collect(taffy, node, *child, flat, portals, parent_x, parent_y, measure);
             flat.push(FlatView {
                 kind: FlatViewKind::OpacityEnd,
                 layout: adjusted,
@@ -1008,6 +1036,7 @@ fn collect(
                     child_node,
                     row_view,
                     flat,
+                    portals,
                     x,
                     y - frac_offset,
                     measure,
@@ -1017,6 +1046,17 @@ fn collect(
                 kind: FlatViewKind::ClipEnd,
                 layout: adjusted,
             });
+        }
+        View::Slider { value, on_drag, .. } => {
+            flat.push(FlatView {
+                kind: FlatViewKind::Slider { value, on_drag },
+                layout: adjusted,
+            });
+        }
+        View::Portal { child } => {
+            let mut portal_flat: Vec<FlatView> = Vec::new();
+            collect(taffy, node, *child, &mut portal_flat, portals, 0.0, 0.0, measure);
+            portals.extend(portal_flat);
         }
         View::Component(_) => unreachable!(),
     }

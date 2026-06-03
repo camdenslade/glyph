@@ -825,6 +825,35 @@ impl Renderer {
                             push_image_quad(&mut verts, l, t, fw, fh, corner_radius, tint_arr);
                             current.image_calls.push(ImageCall { path, verts });
                         }
+                        FlatViewKind::Slider { value, .. } => {
+                            let track_h = 4.0;
+                            let thumb_r = 7.0;
+                            let track_y = t + fh / 2.0 - track_h / 2.0;
+                            let fill_w = (fw * value).max(0.0);
+                            let thumb_x = l + fill_w;
+                            let thumb_y = t + fh / 2.0;
+                            // Empty track
+                            push_rect(
+                                &mut current.rect_verts,
+                                l + fill_w, track_y, (fw - fill_w).max(0.0), track_h,
+                                Color::rgba(0.3, 0.3, 0.35, 1.0),
+                                track_h / 2.0,
+                            );
+                            // Filled track
+                            push_rect(
+                                &mut current.rect_verts,
+                                l, track_y, fill_w, track_h,
+                                Color::rgba(0.345, 0.651, 1.0, 1.0),
+                                track_h / 2.0,
+                            );
+                            // Thumb
+                            push_rect(
+                                &mut current.rect_verts,
+                                thumb_x - thumb_r, thumb_y - thumb_r, thumb_r * 2.0, thumb_r * 2.0,
+                                Color::WHITE,
+                                thumb_r,
+                            );
+                        }
                         _ => {}
                     }
                 }
