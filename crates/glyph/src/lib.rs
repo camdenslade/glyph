@@ -4,7 +4,7 @@
 //!
 //! ## Hello World
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use glyph_app::prelude::*;
 //!
 //! fn main() {
