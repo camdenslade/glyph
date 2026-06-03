@@ -131,8 +131,9 @@ pub fn switch(
             ])
             .width(34.0).height(18.0)
             .bg(track_bg).radius(9.0)
-            .padding_x(thumb_x)
-            .align_center().into(),
+            .padding_left(thumb_x)
+            .padding_top(2.0)
+            .into(),
         ])
         .align_center().into(),
         move || on_change(!on),
