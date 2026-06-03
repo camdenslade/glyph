@@ -1,7 +1,7 @@
 [package]
 publish     = false
 name = "github-glyph"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 [[bin]]
@@ -9,8 +9,8 @@ name = "github-glyph"
 path = "src/main.rs"
 
 [dependencies]
-core-glyph = { version = "0.2.0", path = "../core-glyph" }
-platform-glyph = { version = "0.2.0", path = "../platform-glyph" }
-ui-glyph = { version = "0.2.0", path = "../ui-glyph" }
+core-glyph = { version = "0.2.1", path = "../core-glyph" }
+platform-glyph = { version = "0.2.1", path = "../platform-glyph" }
+ui-glyph = { version = "0.2.1", path = "../ui-glyph" }
 dirs = "5"
 rfd = "0.15"

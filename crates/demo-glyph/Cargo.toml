@@ -1,7 +1,7 @@
 [package]
 publish     = false
 name = "demo-glyph"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 default-run = "demo-glyph"
 
@@ -19,10 +19,10 @@ name = "demo_glyph"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-glyph          = { version = "0.2.0", path = "../glyph" }
+glyph          = { version = "0.2.1", path = "../glyph", package = "glyph-app" }
 # kept for hot-reload binary which needs platform-glyph directly
-platform-glyph = { version = "0.2.0", path = "../platform-glyph", optional = true }
-hot-glyph      = { version = "0.2.0", path = "../hot-glyph", optional = true }
+platform-glyph = { version = "0.2.1", path = "../platform-glyph", optional = true }
+hot-glyph      = { version = "0.2.1", path = "../hot-glyph", optional = true }
 
 [features]
 hot-reload = ["hot-glyph", "platform-glyph/hot-reload"]

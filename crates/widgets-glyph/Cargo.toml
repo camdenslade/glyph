@@ -1,6 +1,6 @@
 [package]
 name = "widgets-glyph"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Pre-built interactive widgets for the Glyph UI framework"
 repository = "https://github.com/camdenslade/glyph"
@@ -10,4 +10,4 @@ keywords    = ["gui", "ui", "desktop", "gpu", "native"]
 categories  = ["gui", "graphics"]
 
 [dependencies]
-core-glyph = { version = "0.2.0", path = "../core-glyph" }
+core-glyph = { version = "0.2.1", path = "../core-glyph" }

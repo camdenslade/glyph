@@ -1,6 +1,6 @@
 [package]
-name        = "glyph"
-version     = "0.2.0"
+name        = "glyph-app"
+version     = "0.2.1"
 edition     = "2021"
 description = "A GPU-native desktop app framework for Rust — one crate, one import"
 repository  = "https://github.com/camdenslade/glyph"
@@ -10,9 +10,9 @@ keywords    = ["gui", "ui", "desktop", "native", "gpu"]
 categories  = ["gui", "graphics", "rendering"]
 
 [dependencies]
-core-glyph     = { version = "0.2.0", path = "../core-glyph" }
-platform-glyph = { version = "0.2.0", path = "../platform-glyph" }
-ui-glyph       = { version = "0.2.0", path = "../ui-glyph" }
+core-glyph     = { version = "0.2.1", path = "../core-glyph" }
+platform-glyph = { version = "0.2.1", path = "../platform-glyph" }
+ui-glyph       = { version = "0.2.1", path = "../ui-glyph" }
 
 [features]
 default    = []

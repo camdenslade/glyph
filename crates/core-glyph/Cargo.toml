@@ -1,6 +1,6 @@
 [package]
 name = "core-glyph"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "View tree, Signal<T>, flexbox layout, and flat quad output for the Glyph UI framework"
 repository = "https://github.com/camdenslade/glyph"
