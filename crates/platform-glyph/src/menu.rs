@@ -3,23 +3,7 @@
 //! Build a `MenuBar` with the declarative API, then pass it to `AppBuilder::menu()`.
 //! On macOS it becomes the global app menu. On Windows it attaches to each window.
 //!
-//! # Example
-//! ```rust,no_run
-//! use glyph::prelude::*;
-//!
-//! let menu = MenuBar::new()
-//!     .submenu("File", |m: SubMenuBuilder| m
-//!         .item("New",  "CmdOrCtrl+N", || println!("new"))
-//!         .item("Open", "CmdOrCtrl+O", || println!("open"))
-//!         .separator()
-//!         .item("Quit", "CmdOrCtrl+Q", || std::process::exit(0))
-//!     )
-//!     .submenu("Edit", |m: SubMenuBuilder| m.cut().copy().paste().select_all());
-//!
-//! App::builder(|_, _| (dark_theme(), my_view()), dark_theme(), "App", 800.0, 600.0)
-//!     .menu(menu)
-//!     .run();
-//! ```
+//! See the `glyph` crate for a full usage example.
 
 use muda::{
     accelerator::{Accelerator, Code, Modifiers},

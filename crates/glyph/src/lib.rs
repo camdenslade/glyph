@@ -8,9 +8,17 @@
 //! use glyph::prelude::*;
 //!
 //! fn main() {
-//!     App::run("Hello", 800.0, 600.0, |_| {
-//!         text("Hello, world!", 32.0).color(Color::WHITE).into()
-//!     });
+//!     App::run(
+//!         |_, _| {
+//!             let theme = dark_theme();
+//!             let view = text("Hello, world!", TEXT_2XL).color(theme.text).into();
+//!             (theme, view)
+//!         },
+//!         dark_theme(),
+//!         "Hello",
+//!         800.0,
+//!         600.0,
+//!     );
 //! }
 //! ```
 

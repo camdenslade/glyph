@@ -18,9 +18,7 @@ use std::sync::{Arc, Mutex, Weak};
 use crate::signal::{Signal, NEEDS_REDRAW};
 use crate::view::Lerp;
 
-// ---------------------------------------------------------------------------
 // Easing functions
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Easing {
@@ -75,9 +73,7 @@ fn cubic_bezier(x: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     ay * t * t * t + by_ * t * t + cy * t
 }
 
-// ---------------------------------------------------------------------------
 // Global tween registry — the platform polls this each frame
-// ---------------------------------------------------------------------------
 
 static REGISTRY: std::sync::OnceLock<Arc<Mutex<Vec<Weak<dyn AnyTween>>>>> =
     std::sync::OnceLock::new();
@@ -108,9 +104,7 @@ trait AnyTween: Send + Sync {
     fn tick(&self, dt: f32) -> bool;
 }
 
-// ---------------------------------------------------------------------------
 // Tween<T>
-// ---------------------------------------------------------------------------
 
 struct TweenInner<T: Lerp> {
     signal:   Signal<T>,

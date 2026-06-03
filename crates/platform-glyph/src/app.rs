@@ -17,10 +17,7 @@ use winit::{
     window::{Cursor, CursorIcon, Window, WindowId},
 };
 
-// ---------------------------------------------------------------------------
-// WindowOpener — cheaply cloneable handle for opening new windows from closures
-// WindowCloser — cheaply cloneable handle for closing the current window
-// ---------------------------------------------------------------------------
+
 
 type BuildViewFn = Box<dyn Fn(&WindowOpener, &WindowCloser) -> (Theme, View) + Send>;
 
@@ -93,9 +90,7 @@ impl WindowCloser {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Per-window state
-// ---------------------------------------------------------------------------
 
 /// Lightweight cursor/hover info extracted from the flat list after each redraw.
 struct HitItem {
@@ -183,9 +178,7 @@ impl WindowState {
     }
 }
 
-// ---------------------------------------------------------------------------
 // App — window manager
-// ---------------------------------------------------------------------------
 
 pub struct App {
     ctx: Option<Arc<GpuContext>>,
@@ -1366,9 +1359,7 @@ impl ApplicationHandler for App {
     }
 }
 
-// ---------------------------------------------------------------------------
 // TextArea cursor helpers
-// ---------------------------------------------------------------------------
 
 fn byte_to_line_col(s: &str, byte: usize) -> (usize, usize) {
     let before = &s[..byte.min(s.len())];
@@ -1453,10 +1444,8 @@ fn decorate_text_input_state(flat: &mut [FlatView], edit: &TextEditState) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // DPI scaling: layout runs in logical pixels; renderer works in physical pixels.
 // Scale every position, size, and font size in the flat list before rendering.
-// ---------------------------------------------------------------------------
 
 fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
     if (scale - 1.0).abs() < f32::EPSILON {
@@ -1639,11 +1628,9 @@ fn scale_flat(flat: Vec<FlatView>, scale: f32) -> Vec<FlatView> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
 // VirtualList range tracking: compute (offset_y, first_row, last_row) for each
 // ScrollRegion that precedes a VirtualList clip so we can detect when the visible
 // set of rows changes and a full rebuild is needed.
-// ---------------------------------------------------------------------------
 
 /// Snapshot the VirtualList offset values at the time of the last full rebuild.
 /// Stored in `ws.vlist_ranges` after each rebuild. On the next frame, the live
@@ -1660,9 +1647,7 @@ fn vlist_ranges_from_flat(flat: &[FlatView]) -> Vec<f32> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
 // Nested scroll dispatch: innermost container wins, bubbles to outer if at limit.
-// ---------------------------------------------------------------------------
 
 fn apply_scroll(items: &[ScrollItem], cx: f32, cy: f32, dx: f32, dy: f32) {
     // Iterate in reverse so the last-emitted (innermost/deepest) container is
@@ -1686,9 +1671,7 @@ fn apply_scroll(items: &[ScrollItem], cx: f32, cy: f32, dx: f32, dy: f32) {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Scroll dispatch — only used by HotApp's MouseWheel handler.
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "hot-reload")]
 fn dispatch_scroll(
@@ -2008,9 +1991,7 @@ mod tests {
     }
 }
 
-// ---------------------------------------------------------------------------
 // HotApp (hot-reload variant, unchanged from before)
-// ---------------------------------------------------------------------------
 
 #[cfg(feature = "hot-reload")]
 pub struct HotApp {

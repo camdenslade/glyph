@@ -7,9 +7,7 @@
 /// the function-pointer table (`GlyphSignalTable`).
 use std::os::raw::{c_char, c_void};
 
-// ---------------------------------------------------------------------------
 // POD mirrors of glyph-core types
-// ---------------------------------------------------------------------------
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -44,9 +42,7 @@ pub struct CTheme {
     pub font_size: f32,
 }
 
-// ---------------------------------------------------------------------------
 // Callback pairs — replace Box<dyn Fn()> and Box<dyn Fn(bool)>
-// ---------------------------------------------------------------------------
 
 /// Equivalent to `Box<dyn Fn()>`. The guest allocates `data` and the host
 /// calls `fn_ptr(data)` on click. After the view is dropped the host calls
@@ -86,9 +82,7 @@ pub struct CCallback1Str {
 unsafe impl Send for CCallback1Str {}
 unsafe impl Sync for CCallback1Str {}
 
-// ---------------------------------------------------------------------------
 // CViewDesc — the C-safe view tree
-// ---------------------------------------------------------------------------
 
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -246,9 +240,7 @@ pub struct CViewDesc {
     pub data: *mut c_void,
 }
 
-// ---------------------------------------------------------------------------
 // Signal table — passed to glyph_create_state so the guest can access host signals
-// ---------------------------------------------------------------------------
 
 /// Function-pointer table the host fills in and passes to `glyph_create_state`.
 /// The guest stores the pointers it needs; the host keeps the table alive for
@@ -280,9 +272,7 @@ pub struct GlyphSignalTable {
     pub set_str: extern "C" fn(handle: *mut c_void, val: *const c_char),
 }
 
-// ---------------------------------------------------------------------------
 // Guest dylib symbol names (looked up by the host via libloading)
-// ---------------------------------------------------------------------------
 
 pub const SYM_CREATE_STATE: &[u8] = b"glyph_create_state\0";
 pub const SYM_BUILD_VIEW: &[u8] = b"glyph_build_view\0";

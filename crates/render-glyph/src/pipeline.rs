@@ -397,9 +397,7 @@ impl ImagePipeline {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Shadow pipeline — analytic Gaussian drop shadows for rounded rects
-// ---------------------------------------------------------------------------
 
 /// One vertex of a shadow quad. All per-shadow data is replicated to every
 /// vertex so the fragment shader can compute the analytic coverage at each pixel.

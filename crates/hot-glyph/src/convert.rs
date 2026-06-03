@@ -17,9 +17,7 @@ use crate::abi::{
     FnFreeStr, GlyphSignalTable,
 };
 
-// ---------------------------------------------------------------------------
 // Signal registry — host owns all signals, guest gets opaque handles
-// ---------------------------------------------------------------------------
 
 pub enum SignalSlot {
     I32(Signal<i32>),
@@ -120,9 +118,7 @@ impl SignalRegistry {
     }
 }
 
-// ---------------------------------------------------------------------------
 // The GlyphSignalTable the host provides to the guest at create_state time
-// ---------------------------------------------------------------------------
 
 // SignalRegistry pointer stored in a thread-local so C trampolines (no &self) can reach it.
 std::thread_local! {
@@ -230,9 +226,7 @@ pub fn build_signal_table() -> GlyphSignalTable {
     }
 }
 
-// ---------------------------------------------------------------------------
 // CViewDesc → View
-// ---------------------------------------------------------------------------
 
 unsafe fn cstr_to_string(ptr: *mut c_char) -> String {
     if ptr.is_null() {
