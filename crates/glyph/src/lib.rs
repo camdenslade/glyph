@@ -5,7 +5,7 @@
 //! ## Hello World
 //!
 //! ```rust,no_run
-//! use glyph::prelude::*;
+//! use glyph_app::prelude::*;
 //!
 //! fn main() {
 //!     App::run(
