@@ -3,6 +3,9 @@ use core_glyph::{
 };
 use std::path::PathBuf;
 use render_glyph::{GpuContext, Renderer};
+use crate::menu::{install_menu_macos, poll_menu_events, MenuBar};
+#[cfg(target_os = "windows")]
+use crate::menu::install_menu_windows;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -189,12 +192,15 @@ pub struct App {
     windows: HashMap<WindowId, WindowState>,
     opener: WindowOpener,
     queue: Arc<Mutex<Vec<WindowRequest>>>,
-    /// Windows requested to close via `WindowCloser::close()`.
     pending_close: Arc<Mutex<Vec<WindowId>>>,
     initial: Option<WindowRequest>,
     last_tick: Option<Instant>,
     pending_fonts: Vec<Vec<u8>>,
     pending_font_files: Vec<PathBuf>,
+    on_quit: Option<Box<dyn Fn() + Send>>,
+    on_open_file: Option<Box<dyn Fn(PathBuf) + Send>>,
+    on_focus: Option<Box<dyn Fn(bool) + Send>>,
+    menu: Option<MenuBar>,
 }
 
 /// Builder for configuring an `App` before running it.
@@ -206,11 +212,14 @@ pub struct AppBuilder {
     height: f64,
     fonts: Vec<Vec<u8>>,
     font_files: Vec<PathBuf>,
+    on_quit: Option<Box<dyn Fn() + Send>>,
+    on_open_file: Option<Box<dyn Fn(PathBuf) + Send>>,
+    on_focus: Option<Box<dyn Fn(bool) + Send>>,
+    menu: Option<MenuBar>,
 }
 
 impl AppBuilder {
-    /// Add a font from raw bytes. The font's family name (embedded in the font
-    /// file) becomes available as `FontFamily::Name("...")`.
+    /// Add a font from raw bytes.
     pub fn font(mut self, data: Vec<u8>) -> Self {
         self.fonts.push(data);
         self
@@ -219,6 +228,30 @@ impl AppBuilder {
     /// Add a font from a file path.
     pub fn font_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.font_files.push(path.into());
+        self
+    }
+
+    /// Called just before the app exits (all windows closed).
+    pub fn on_quit(mut self, f: impl Fn() + Send + 'static) -> Self {
+        self.on_quit = Some(Box::new(f));
+        self
+    }
+
+    /// Called when the user drops a file onto the app or the OS sends an open-file event.
+    pub fn on_open_file(mut self, f: impl Fn(PathBuf) + Send + 'static) -> Self {
+        self.on_open_file = Some(Box::new(f));
+        self
+    }
+
+    /// Called when the app gains (`true`) or loses (`false`) focus.
+    pub fn on_focus(mut self, f: impl Fn(bool) + Send + 'static) -> Self {
+        self.on_focus = Some(Box::new(f));
+        self
+    }
+
+    /// Attach a native OS menu bar.
+    pub fn menu(mut self, menu: MenuBar) -> Self {
+        self.menu = Some(menu);
         self
     }
 
@@ -243,6 +276,10 @@ impl AppBuilder {
             last_tick: None,
             pending_fonts: self.fonts,
             pending_font_files: self.font_files,
+            on_quit: self.on_quit,
+            on_open_file: self.on_open_file,
+            on_focus: self.on_focus,
+            menu: self.menu,
         };
         event_loop.run_app(&mut app).expect("event loop run");
     }
@@ -276,6 +313,10 @@ impl App {
             height,
             fonts: Vec::new(),
             font_files: Vec::new(),
+            on_quit: None,
+            on_open_file: None,
+            on_focus: None,
+            menu: None,
         }
     }
 
@@ -358,6 +399,19 @@ impl ApplicationHandler for App {
             );
             let ctx = pollster::block_on(GpuContext::new_with_window(Arc::clone(&window)));
             self.ctx = Some(Arc::clone(&ctx));
+            // Install native menu bar (macOS: global; Windows: per-window)
+            if let Some(ref mb) = self.menu {
+                install_menu_macos(mb);
+                #[cfg(target_os = "windows")]
+                {
+                    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                    if let Ok(handle) = window.window_handle() {
+                        if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                            install_menu_windows(mb, h.hwnd.get() as isize);
+                        }
+                    }
+                }
+            }
             let size = window.inner_size();
             let (surface, surface_cfg) =
                 ctx.create_surface(Arc::clone(&window), size.width.max(1), size.height.max(1));
@@ -448,6 +502,11 @@ impl ApplicationHandler for App {
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
         }
 
+        // Dispatch native menu item clicks
+        if let Some(ref mb) = self.menu {
+            poll_menu_events(&mb.handlers);
+        }
+
         let pending: Vec<WindowRequest> = self.queue.lock().unwrap().drain(..).collect();
         for req in pending {
             self.open_window(req, event_loop);
@@ -460,6 +519,7 @@ impl ApplicationHandler for App {
         }
 
         if self.windows.is_empty() && self.ctx.is_some() {
+            if let Some(ref f) = self.on_quit { f(); }
             event_loop.exit();
         }
     }
@@ -471,8 +531,17 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => {
                 self.windows.remove(&id);
                 if self.windows.is_empty() {
+                    if let Some(ref f) = self.on_quit { f(); }
                     event_loop.exit();
                 }
+            }
+
+            WindowEvent::Focused(gained) => {
+                if let Some(ref f) = self.on_focus { f(gained); }
+            }
+
+            WindowEvent::DroppedFile(path) => {
+                if let Some(ref f) = self.on_open_file { f(path); }
             }
 
             WindowEvent::Resized(size) => {

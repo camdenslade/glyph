@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "crates/glyph",
+    "crates/glyph-cli",
     "crates/core-glyph",
     "crates/render-glyph",
     "crates/text-glyph",

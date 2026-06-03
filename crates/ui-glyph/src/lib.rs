@@ -1,8 +1,12 @@
 pub mod buttons;
 pub mod colors;
 pub mod components;
+pub mod data;
+pub mod forms;
 pub mod icons;
 pub mod layout;
+pub mod navigation;
+pub mod overlays;
 pub mod shadows;
 pub mod spacing;
 pub mod themes;
@@ -329,6 +333,34 @@ pub use components::{
     tooltip,
     // Card
     CardOptions,
+};
+
+// Forms
+pub use forms::{
+    button_group, checkbox, checkbox_bare, radio_button, radio_group, search_bar,
+    select, select_menu, slider, slider_labeled, stepper,
+    switch, switch_row, toggle_btn, toggle_group,
+};
+
+// Navigation
+pub use navigation::{
+    back_button, bottom_tab_bar, breadcrumb_nav, command_palette, menu_bar,
+    overflow_menu_btn, pagination, sidebar, sidebar_item,
+    sidebar_section_label, steps_indicator, toolbar, topbar, SidebarItem, TabItem, TopbarConfig,
+};
+
+// Overlays
+pub use overlays::{
+    accordion, accordion_item, alert_dialog, bottom_sheet, collapsible, dialog,
+    dropdown_menu, drawer_right, menu_item, menu_item_destructive, menu_separator,
+    modal, popover, toast, toast_stack, tooltip_panel, ToastKind,
+};
+
+// Data display
+pub use data::{
+    bar_chart, data_list, data_table, description_list, gauge, heatmap,
+    media_object, media_object_sm, sparkline, spinner, spinner_row,
+    timeline, TableColumn, TimelineItem, BarDatum,
 };
 
 // Icons (Ionicons)

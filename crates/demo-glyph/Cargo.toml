@@ -18,12 +18,10 @@ name = "demo_glyph"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-core-glyph     = { version = "0.1.1", path = "../core-glyph" }
-platform-glyph = { version = "0.1.1", path = "../platform-glyph" }
-widgets-glyph  = { version = "0.1.1", path = "../widgets-glyph" }
-ui-glyph       = { version = "0.1.1", path = "../ui-glyph" }
+glyph          = { path = "../glyph" }
+# kept for hot-reload binary which needs platform-glyph directly
+platform-glyph = { version = "0.1.1", path = "../platform-glyph", optional = true }
 hot-glyph      = { version = "0.1.1", path = "../hot-glyph", optional = true }
-taffy          = "0.5"
 
 [features]
 hot-reload = ["hot-glyph", "platform-glyph/hot-reload"]

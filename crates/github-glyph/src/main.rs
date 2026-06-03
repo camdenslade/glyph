@@ -33,7 +33,6 @@ use std::{
     thread,
 };
 
-// ── GitHub Dark Default palette ────────────────────────────────────────────────
 
 const CANVAS:      Color = Color::rgb(0.051, 0.067, 0.090);   // #0D1117
 const SURFACE:     Color = Color::rgb(0.086, 0.106, 0.133);   // #161B22
@@ -61,7 +60,6 @@ const DIFF_DEL_GUT:   Color = Color::rgb(0.176, 0.063, 0.082);   // #2D1015
 const DIFF_HUNK_BG:   Color = Color::rgb(0.075, 0.118, 0.200);   // #131E33
 const DIFF_HUNK_TEXT: Color = Color::rgb(0.345, 0.506, 0.800);   // #5881CC
 
-// ── Data types ─────────────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
 enum FileStatus { Modified, Added, Deleted, Untracked, Renamed, Conflict }
@@ -131,7 +129,6 @@ struct GitBranch {
     behind: u32,
 }
 
-// ── App state ──────────────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
 enum SidebarTab { Changes, History, Branches }
@@ -216,7 +213,6 @@ impl AppState {
     }
 }
 
-// ── Git commands ───────────────────────────────────────────────────────────────
 
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git").current_dir(repo).args(args).output().map_err(|e| e.to_string())?;
@@ -312,7 +308,6 @@ fn git_commit(repo: &Path, summary: &str, body: &str) -> Result<(), String> {
     git(repo, &["commit", "-m", &msg]).map(|_| ())
 }
 
-// ── Utilities ──────────────────────────────────────────────────────────────────
 
 fn relative_date(iso: &str) -> String {
     let dp = iso.split(' ').next().unwrap_or(iso);
@@ -343,7 +338,6 @@ fn load_recent_repos() -> Vec<PathBuf> {
 
 fn glyph_logo_path() -> String { format!("{}/assets/glyph_logo.png", env!("CARGO_MANIFEST_DIR")) }
 
-// ── Main ───────────────────────────────────────────────────────────────────────
 
 fn main() {
     let recent = load_recent_repos();
@@ -372,7 +366,6 @@ fn main() {
     );
 }
 
-// ── Root ───────────────────────────────────────────────────────────────────────
 
 fn build_ui(state: Signal<AppState>, scroll_y: Signal<f32>, max_scroll: Signal<(f32, f32)>) -> View {
     let st = state.get();
@@ -413,7 +406,6 @@ fn build_ui(state: Signal<AppState>, scroll_y: Signal<f32>, max_scroll: Signal<(
         .gap(0.0).fill_width().fill_height().bg(CANVAS).into()
 }
 
-// ── Global Header ──────────────────────────────────────────────────────────────
 // Dark bar: logo | repo name + branch | spacer | refresh | repo switcher dots
 
 fn render_global_header(st: &AppState, state: Signal<AppState>) -> View {
@@ -516,7 +508,6 @@ fn render_global_header(st: &AppState, state: Signal<AppState>) -> View {
     .into()
 }
 
-// ── Repo Tab Bar ───────────────────────────────────────────────────────────────
 // GitHub-style horizontal tabs: Code | Issues | Pull Requests | Actions | Projects
 
 fn render_repo_tabs(st: &AppState, state: Signal<AppState>) -> View {
@@ -566,7 +557,6 @@ fn render_repo_tabs(st: &AppState, state: Signal<AppState>) -> View {
     .into()
 }
 
-// ── Left Panel (270px) ─────────────────────────────────────────────────────────
 // Contains: sidebar tabs + file list OR commit log OR branches + commit panel
 
 fn render_left_panel(
@@ -630,7 +620,6 @@ fn render_sidebar_tabs(st: &AppState, state: Signal<AppState>) -> View {
     .bg(SURFACE).border(BORDER, 1.0).into()
 }
 
-// ── Changes panel ──────────────────────────────────────────────────────────────
 
 fn render_changes_panel(st: &AppState, state: Signal<AppState>) -> View {
     let has_unstaged = !st.unstaged.is_empty();
@@ -801,7 +790,6 @@ fn file_type_icon(ext: &str, color: Color) -> View {
     }
 }
 
-// ── History panel ──────────────────────────────────────────────────────────────
 
 fn render_history_panel(
     st: &AppState,
@@ -850,7 +838,6 @@ fn commit_row(c: &GitCommit) -> View {
     ]).gap(0.0).into()
 }
 
-// ── Branches panel ─────────────────────────────────────────────────────────────
 
 fn render_branches_panel(st: &AppState, state: Signal<AppState>) -> View {
     if st.branches.is_empty() {
@@ -914,7 +901,6 @@ fn branch_row(b: &GitBranch, repo_path: &Option<PathBuf>, state: Signal<AppState
     ]).gap(0.0).into()
 }
 
-// ── Commit panel (bottom of left panel) ────────────────────────────────────────
 // Mimics GitHub's "Commit changes" box
 
 fn render_commit_panel(st: &AppState, state: Signal<AppState>) -> View {
@@ -1032,7 +1018,6 @@ fn render_commit_panel(st: &AppState, state: Signal<AppState>) -> View {
     ]).gap(0.0).fill_width().bg(SURFACE).into()
 }
 
-// ── Main canvas (right pane) ───────────────────────────────────────────────────
 
 fn render_main_canvas(
     st: &AppState,

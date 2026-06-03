@@ -7,12 +7,15 @@ repository = "https://github.com/camdenslade/glyph"
 license = "MIT"
 
 [dependencies]
-core-glyph = { version = "0.1.1", path = "../core-glyph" }
+core-glyph   = { version = "0.1.1", path = "../core-glyph" }
 render-glyph = { version = "0.1.1", path = "../render-glyph" }
-hot-glyph = { version = "0.1.1", path = "../hot-glyph", optional = true }
-winit    = "0.30"
-wgpu     = "22"
-pollster = "0.3"
+hot-glyph    = { version = "0.1.1", path = "../hot-glyph", optional = true }
+winit        = "0.30"
+wgpu         = "22"
+pollster     = "0.3"
+rfd          = "0.15"
+arboard      = "3"
+muda = "0.19.2"
 
 [features]
 hot-reload = ["hot-glyph"]
