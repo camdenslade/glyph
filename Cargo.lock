@@ -1514,7 +1514,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "glyph-cli"
+name = "glyph-kit"
 version = "0.2.0"
 dependencies = [
  "anyhow",

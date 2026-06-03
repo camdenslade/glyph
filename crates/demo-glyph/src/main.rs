@@ -105,9 +105,9 @@ fn main() {
             // ── Progress ─────────────────────────────────────────────────────
             let progress = card(&theme, vec![
                 text("Progress", TEXT_SM).color(theme.text_muted).into(),
-                progress_bar(0.72, Color::rgb(0.212, 0.506, 0.965), theme.border, 6.0),
+                progress_bar(0.72, theme.primary, theme.border, 6.0),
                 progress_bar(0.45, Color::rgb(0.247, 0.722, 0.314), theme.border, 6.0),
-                progress_bar(0.91, Color::rgb(0.973, 0.318, 0.286), theme.border, 6.0),
+                progress_bar(0.91, Color::rgb(0.973, 0.32, 0.286), theme.border, 6.0),
             ]);
 
             let content = column(vec![
