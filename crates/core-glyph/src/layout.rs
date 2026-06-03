@@ -646,6 +646,7 @@ fn build_virtual_inner(
         .expect("taffy node")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect(
     taffy: &mut TaffyTree<Option<MeasureContext>>,
     node: NodeId,
