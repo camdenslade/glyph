@@ -10,8 +10,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    runs-on: macos-latest
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,7 +37,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build
-        run: cargo build --workspace --exclude github-glyph
+        run: cargo build --workspace --exclude github-glyph --exclude demo-glyph
 
       - name: Test
         run: cargo test --workspace --exclude github-glyph
