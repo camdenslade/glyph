@@ -198,6 +198,10 @@ impl HotLoader {
         // Only call create_state on the first load. On reloads we reuse the
         // existing guest_state pointer — the memory it points to is still valid
         // because the host's allocator owns it (via Box::into_raw in the guest).
+        // CAUTION: If the guest's state struct layout changes (field added/reordered),
+        // this pointer reuse will read garbage. Current mitigation: developer must
+        // full-restart for layout-breaking changes. A versioned reset protocol would
+        // make this safe automatically.
         if self.guest_state.is_null() {
             set_active_registry(&mut *self.registry as *mut SignalRegistry);
             self.guest_state = unsafe {
@@ -210,6 +214,9 @@ impl HotLoader {
         eprintln!("[glyph-hot] loaded {:?}", self.lib_path);
     }
 
+    // PERF: Rebuilds serialize via build_lock — rapid saves won't pile up
+    // parallel cargo invocations, but the second change waits for the first
+    // build to finish before starting. A cancel-and-restart model would be faster.
     fn kick_rebuild(&self) {
         let pkg = self.package_name.clone();
         let done = Arc::clone(&self.rebuild_done);

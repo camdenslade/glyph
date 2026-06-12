@@ -33,6 +33,9 @@ struct ImageCall {
 
 // A scissored draw batch. Each ClipStart flushes the previous batch and
 // begins a new one with updated scissor bounds.
+// PERF: Batches are rebuilt from scratch every frame. Caching vertex buffers
+// for unchanged subtrees and doing a CPU-side diff would reduce GPU upload cost
+// on complex static layouts.
 struct DrawBatch {
     scissor: Option<[u32; 4]>,
     cursor_visible: bool,

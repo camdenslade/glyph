@@ -5,6 +5,10 @@
 /// those are Rust-ABI types that only live in the host. The guest produces a
 /// `CViewDesc` tree and receives opaque signal handles it reads/writes through
 /// the function-pointer table (`GlyphSignalTable`).
+// NOTE: Adding new variants to CViewTag is a breaking ABI change — guest and
+// host must be rebuilt together. Keeping a version field in GlyphSignalTable
+// (or a separate `hot_glyph_abi_version() -> u32` symbol) would let the loader
+// detect mismatches and refuse to load rather than silently misinterpreting memory.
 use std::os::raw::{c_char, c_void};
 
 // POD mirrors of glyph-core types

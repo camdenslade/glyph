@@ -28,6 +28,8 @@ pub enum Easing {
     EaseInOut,
     /// Cubic bezier with two control points P1 and P2 (P0=(0,0), P3=(1,1)).
     CubicBezier(f32, f32, f32, f32),
+    // FEAT: Spring(stiffness, damping) — physics-based settle animation without
+    // a fixed duration; much more natural for drag-release and swipe gestures.
 }
 
 impl Easing {
@@ -75,6 +77,8 @@ fn cubic_bezier(x: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
 
 // Global tween registry — the platform polls this each frame
 
+// PERF: Registry lock is grabbed every frame even when no tweens are running.
+// Could short-circuit with an AtomicUsize tween count to avoid the mutex.
 static REGISTRY: std::sync::OnceLock<Arc<Mutex<Vec<Weak<dyn AnyTween>>>>> =
     std::sync::OnceLock::new();
 

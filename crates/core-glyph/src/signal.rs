@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+// PERF: Single atomic flag covers the whole app — fine for now, but a
+// per-window dirty flag would let multi-window apps skip unchanged windows.
 pub(crate) static NEEDS_REDRAW: AtomicBool = AtomicBool::new(false);
 
 pub fn needs_redraw() -> bool {
@@ -14,6 +16,8 @@ pub fn clear_redraw() {
 /// Shared, cloneable reactive value. Clones share the same underlying cell,
 /// so writes from any clone are visible to all others and trigger a redraw.
 /// `Signal` is `Send + Sync` so it can be written from background threads.
+// FEAT: No `.on_change(cb)` subscription — could add a Vec<Weak<dyn Fn()>>
+// side-channel for computed values or derived state without rebuilding the tree.
 pub struct Signal<T: Clone> {
     value: Arc<Mutex<T>>,
 }
@@ -29,6 +33,8 @@ impl<T: Clone> Signal<T> {
 
     pub fn set(&self, value: T) {
         *self.value.lock().unwrap() = value;
+        // Relaxed is safe here: the event loop reads NEEDS_REDRAW in the same
+        // thread after the frame; no happens-before needed across cores.
         NEEDS_REDRAW.store(true, Ordering::Relaxed);
     }
 }

@@ -1,4 +1,7 @@
 // Single R8Unorm texture; increase if the atlas fills up for large font sizes.
+// PERF: Atlas never evicts glyphs — long sessions with many distinct characters
+// (e.g. CJK) will exhaust the 1024×1024 budget silently. A LRU eviction policy
+// or dynamic atlas growth (doubling to 2048) would handle these cases.
 const ATLAS_SIZE: u32 = 1024;
 
 /// UV coordinates and pixel metrics for one glyph in the atlas.

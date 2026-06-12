@@ -84,6 +84,8 @@ pub enum FlatViewKind {
     /// Scroll region metadata emitted just before a ClipStart for Scroll/VirtualList nodes.
     /// Carries the offset signals and content bounds so the platform can apply momentum
     /// without rebuilding the view tree.
+    // FEAT: Add horizontal VirtualList support — current impl only virtualizes Y.
+    // Also: `on_scroll: Option<Arc<dyn Fn(f32, f32)>>` hook for lazy-load triggers.
     ScrollRegion {
         offset_x: Signal<f32>,
         offset_y: Signal<f32>,
@@ -121,6 +123,7 @@ pub enum FlatViewKind {
     },
     /// An interactive slider track. The platform calls `on_drag` with a
     /// normalized value in `[0, 1]` as the user drags.
+    // FEAT: Add `step: Option<f32>` for discrete tick snapping (e.g. integer volume levels).
     Slider {
         value: f32,
         on_drag: Arc<dyn Fn(f32)>,
@@ -136,6 +139,9 @@ pub enum FlatViewKind {
     },
 }
 
+// PERF: The entire tree is rebuilt + Taffy layout re-run every frame.
+// For static subtrees a dirty-flag approach (skip expand+Taffy if no signal
+// changed under that subtree) could meaningfully reduce CPU on large UIs.
 /// Stateless entry point for layout. Call `ViewTree::build` each frame.
 pub struct ViewTree;
 

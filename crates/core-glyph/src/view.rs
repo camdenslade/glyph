@@ -121,6 +121,8 @@ impl Shadow {
 /// Font family selector. `Name` loads a font previously registered via
 /// `App::load_font` / `Renderer::load_font`. Falls back to the system
 /// sans-serif if the name is not found.
+// FEAT: `FontStyle::Italic` is not exposed — cosmic-text supports it but the
+// View API omits it. Low-effort addition to FontFamily or a new FontStyle enum.
 #[derive(Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FontFamily {
@@ -266,6 +268,8 @@ pub enum View {
         style: Style,
         disabled: bool,
     },
+    // PERF: Variable-height rows require a different data structure (prefix-sum
+    // tree) to binary-search the visible range in O(log n) instead of O(1).
     /// A virtualized list that only builds row views for the visible range.
     VirtualList {
         item_count: usize,
@@ -310,6 +314,8 @@ pub enum View {
     /// flex layout — it does not affect the placement of any siblings. The child's
     /// flat views are appended to the end of the frame's draw list so they paint
     /// on top of everything else.
+    // FEAT: Named portal targets (e.g. `portal_into("sidebar")`) would let
+    // children inject content into specific slots (like React portals with a DOM node).
     Portal { child: Box<View> },
 }
 
